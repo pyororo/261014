@@ -67,8 +67,14 @@ elif DEFAULT_FILE.exists():
     df, ref, workplaces, holidays = load(source_key)
     st.sidebar.info(f"기본 파일 사용: data/{DEFAULT_FILE.name}")
 else:
-    st.warning("data/ 폴더에 엑셀이 없습니다. 왼쪽에서 파일을 업로드하세요.")
-    st.stop()
+    # 웹(Streamlit Cloud)에는 엑셀이 없으므로 첫 화면에서 바로 올릴 수 있게 한다 (모바일은 사이드바가 접혀 있음)
+    st.info("시작하려면 가상데이터 엑셀(법인카드_가상데이터_202509-202608.xlsx)을 아래 상자에 끌어다 놓거나 "
+            "'Upload' 버튼을 눌러 고르세요. 파일은 이 화면에서만 쓰고 저장하지 않습니다.")
+    first = st.file_uploader("엑셀 파일 올리기 (.xlsx)", type="xlsx", key="first_upload")
+    if first is None:
+        st.stop()
+    source_key = first.getvalue()
+    df, ref, workplaces, holidays = load(source_key)
 
 # ── 기준값 설정 (점검기준(가상) 시트 기본값, 화면에서 변경 가능) ───────────
 base = default_params(ref)
