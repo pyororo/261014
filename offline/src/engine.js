@@ -285,6 +285,9 @@ const ENGINE = (() => {
     if (h.has("R17")) p.push(`${r.vacation.kind || "휴가"} 기간(${ymd(r.vacation.from)}~${ymd(r.vacation.to)}) 중 사용`);
     return p;
   }
+  function reasonParts(r) {
+    return phrases(r).concat(r.adjustReason ? [r.adjustReason] : []);
+  }
   function reasonShort(r) {
     const p = phrases(r);
     return p.join(", ") + (r.adjustReason ? ` (${r.adjustReason})` : "");
@@ -486,7 +489,7 @@ const ENGINE = (() => {
     });
   }
 
-  return { OPS, DERIVED: Object.keys(DERIVED), ruleName, reasonShort, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
+  return { OPS, DERIVED: Object.keys(DERIVED), ruleName, reasonShort, reasonParts, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
 })();
 
 

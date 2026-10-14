@@ -206,12 +206,12 @@
       (rows.length ? rows.map((r) => { const m = spotMarker(r); return `<tr class="click sev-${r.grade} rvrow-${S.reviews[r.no]?.result || "미검토"} ${S.sel === r.no ? "on" : ""}" data-no="${r.no}" tabindex="0">
         <td><span class="g g-${r.grade}">${r.grade}</span></td><td class="n">${r.score}${r.adjust ? `<div class="muted" title="사전승인 기재로 조정">${r.ruleScore}→${r.score}</div>` : ""}</td>
         <td><div class="chips">${ruleChips(r)}</div></td>
-        <td class="mono" style="white-space:nowrap">${r.dkey.slice(5)} ${m("time", r.time)}<div class="muted">${m("day", (r.holName || r.wdName) + (r.hits.has("R17") ? " · 휴가 중" : ""))}</div>${r.hits.has("R15") ? `<div class="muted">${m("settle", `정산 ${Math.round((r.acctDate - r.date) / 86400000)}일`)}</div>` : ""}</td>
+        <td class="when"><span class="mono">${r.dkey.slice(5)}</span>(${m("day", r.holName || r.wdName)}) <span class="mono">${m("time", r.time)}</span>${r.hits.has("R17") ? `<div class="muted">${m("day", "휴가 중")}</div>` : ""}${r.hits.has("R15") ? `<div class="muted">${m("settle", `정산 ${Math.round((r.acctDate - r.date) / 86400000)}일`)}</div>` : ""}</td>
         <td style="white-space:nowrap">${m("who", esc(r.emp) || '<span class="ng-txt">미기재</span>')}<div class="muted">${esc(r.dept)}</div></td>
         <td class="mer">${m("mer", esc(r.merchant))}${r.overseas ? ` <span class="muted">(${esc(r.currency || "해외")})</span>` : ""}<div class="muted">${m("ind", esc(r.industry))} · ${m("gl", esc(r.glName))}</div>
           <div class="memo-line"><span class="lbl">적요</span><span>${m("memo", r.memo ? esc(r.memo) : '<span class="ng-txt">적요 공란</span>')}</span></div>${m.has("title") ? `<div class="memo-line"><span class="lbl">제목</span><span>${m("title", esc(r.title))}</span></div>` : ""}</td>
         <td class="n">${m("amt", fmt(r.amount))}${r.limit && (r.hits.has("R05") || r.hits.has("R04")) ? `<div class="muted">한도 ${fmt(r.limit)}</div>` : ""}</td>
-        <td class="reason">${esc(ENGINE.reasonShort(r))}</td><td style="white-space:nowrap">${reviewPill(r)}</td></tr>`; }).join("")
+        <td class="reason"><ul class="why">${ENGINE.reasonParts(r).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></td><td style="white-space:nowrap">${reviewPill(r)}</td></tr>`; }).join("")
         : `<tr><td colspan="9" class="empty">선택한 조건(등급·검토결과·규칙)에 해당하는 선별 건이 없습니다.</td></tr>`) + "</tbody>";
     renderDetail();
   }
