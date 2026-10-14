@@ -114,11 +114,13 @@
   function spotMarker(r) {
     const spots = new Map();
     const add = (spot, id) => { if (!spots.has(spot)) spots.set(spot, []); spots.get(spot).push(`${id} ${ENGINE.ruleName(id)}`); };
-    for (const id of r.hits) {
-      if (RULE_SPOTS[id]) RULE_SPOTS[id].forEach((s) => add(s, id));
-      else { const c = R.custom.rules.find((x) => x.id === id); c?.conds.forEach((x) => COL_SPOT[x.col] && add(COL_SPOT[x.col], id)); }
-    }
-    const m = (spot, html) => (spots.has(spot) ? `<mark class="hl" title="확인할 부분: ${esc([...new Set(spots.get(spot))].join(", "))}">${html}</mark>` : html);
+    const spotsOf = (id) => RULE_SPOTS[id] || (R.custom.rules.find((x) => x.id === id)?.conds.map((x) => COL_SPOT[x.col]).filter(Boolean) ?? []);
+    for (const id of r.hits) spotsOf(id).forEach((s) => add(s, id));
+    // 1순위 규칙(금지업종 → 가중치 큰 순)의 칸만 평소에도 형광펜, 나머지는 점선 밑줄
+    const w = (id) => (id === "R03" && r.restrict === "금지" ? 99 : S.weights[id] ?? 0);
+    const top = [...r.hits].filter((id) => spotsOf(id).length).sort((a, b) => w(b) - w(a) || a.localeCompare(b))[0];
+    const primary = new Set(top ? spotsOf(top) : []);
+    const m = (spot, html) => (spots.has(spot) ? `<mark class="hl${primary.has(spot) ? " p" : ""}" title="확인할 부분: ${esc([...new Set(spots.get(spot))].join(", "))}">${html}</mark>` : html);
     m.has = (spot) => spots.has(spot);
     return m;
   }

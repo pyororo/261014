@@ -115,7 +115,9 @@ td.mer { min-width: 200px; }
 .rv-소명요청 { color: var(--accent); background: var(--accent-soft); }
 .rv-부적정 { color: var(--sheet); background: var(--fail); }
 /* 노란 형광펜: 걸린 규칙에서 확인할 부분 */
-mark.hl { background: var(--hl); color: var(--hl-ink); padding: 0 2px; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+/* 평소: 1순위 칸만 형광펜, 나머지는 점선 밑줄 / 행에 올리거나 선택하면 모두 형광펜 */
+mark.hl { background: none; color: inherit; padding: 0 2px; border-radius: 2px; text-decoration: underline dotted var(--mid); text-decoration-thickness: 2px; text-underline-offset: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+mark.hl.p, tbody tr:hover mark.hl, tbody tr.on mark.hl, .lgd mark.hl { background: var(--hl); color: var(--hl-ink); text-decoration: none; }
 .lgd { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--ink-2); margin: 0 0 8px; }
 .lgd .sw { display: inline-block; width: 14px; height: 12px; border-radius: 2px; border: 1px solid var(--rule); vertical-align: -1px; margin-right: 3px; }
 .muted { color: var(--ink-3); }
@@ -265,7 +267,7 @@ button.chip:hover { background: var(--accent-soft); }
         <button class="btn primary" id="xlsxBtn" type="button">결과 엑셀 저장</button>
       </div>
     </div>
-    <div class="lgd"><span><mark class="hl">노란 형광펜</mark> 걸린 규칙에서 확인할 부분 (마우스를 올리면 규칙 이름)</span><span><i class="sw" style="background:var(--sheet)"></i>미검토</span><span><i class="sw" style="background:var(--row-ok)"></i>적정</span><span><i class="sw" style="background:var(--row-ask)"></i>소명요청</span><span><i class="sw" style="background:var(--row-ng)"></i>부적정</span></div>
+    <div class="lgd"><span><mark class="hl p">형광펜</mark> 가장 먼저 확인할 부분</span><span><mark class="hl s" style="background:none;color:inherit;text-decoration:underline dotted var(--mid);text-decoration-thickness:2px;text-underline-offset:3px">점선 밑줄</mark> 함께 확인할 부분 · 행에 마우스를 올리거나 선택하면 모두 형광펜</span><span><i class="sw" style="background:var(--sheet)"></i>미검토</span><span><i class="sw" style="background:var(--row-ok)"></i>적정</span><span><i class="sw" style="background:var(--row-ask)"></i>소명요청</span><span><i class="sw" style="background:var(--row-ng)"></i>부적정</span></div>
     <div class="tbl-wrap"><table id="listTbl"></table></div>
     <div id="detail"></div>
   </section>
