@@ -1,4 +1,4 @@
-"""법인카드 사용 적정성 점검 PoC — 1단계 데이터 정리 · 2단계 규칙 선별 · 3단계 AI 코멘트 · 4단계 기간 분석."""
+"""법인카드 사용 적정성 점검 PoC — 1단계 데이터 정리 · 2단계 규칙 선별 · 3단계 AI 코멘트 · 4단계 기간 분석 · 5단계 검토·결과."""
 import io
 from pathlib import Path
 
@@ -11,10 +11,13 @@ from src.ai import (DISCLAIMER, _sabun, annotate, claude_available, claude_comme
                     read_workplaces)
 from src.loader import load_all, monthly_summary, read_holidays
 from src.patterns import TParams, aggregate, detect_all, monthly_by_user, prepare, recommend
+from src.report import (REVIEW_CHOICES, attach_reviews, build_excel, evaluate, load_reviews, read_answers,
+                        save_reviews)
 from src.rules import (STAGE2_RULES, Params, apply_rules, default_params, read_reference,
                        rule_names, select_for_month)
 
 DEFAULT_FILE = Path(__file__).parent / "data" / "법인카드_가상데이터_202509-202608.xlsx"
+REVIEW_FILE = Path(__file__).parent / "data" / "검토결과.csv"
 
 DISPLAY_COLUMNS = [
     "승인번호", "승인일시", "요일", "휴일여부", "공휴일명", "구분", "카드번호", "직원명",
@@ -33,7 +36,7 @@ AI_NOTICE = ("※ 선별 결과는 점검이 필요한 거래를 고르기 위�
 
 st.set_page_config(page_title="법인카드 점검 PoC", layout="wide")
 st.title("법인카드 사용 적정성 점검 PoC")
-st.caption("1단계 데이터 정리 · 2단계 규칙 기반 선별 · 3단계 AI 코멘트 · 4단계 기간 분석  |  모든 데이터는 교육용 가상 데이터입니다.")
+st.caption("1단계 데이터 정리 · 2단계 규칙 기반 선별 · 3단계 AI 코멘트 · 4단계 기간 분석 · 5단계 검토·결과  |  모든 데이터는 교육용 가상 데이터입니다.")
 
 
 def _src(source):
@@ -46,12 +49,22 @@ def load(source):
             set(read_holidays(_src(source))["일자"]))
 
 
+@st.cache_data(show_spinner=False)
+def load_answers(source):
+    try:
+        return read_answers(_src(source))
+    except ValueError:  # 정답지 시트가 없는 파일 (실제 데이터)
+        return None
+
+
 uploaded = st.sidebar.file_uploader("SAP 추출 엑셀 업로드 (.xlsx)", type="xlsx")
 if uploaded is not None:
-    df, ref, workplaces, holidays = load(uploaded.getvalue())
+    source_key = uploaded.getvalue()
+    df, ref, workplaces, holidays = load(source_key)
     st.sidebar.success(f"업로드 파일 사용: {uploaded.name}")
 elif DEFAULT_FILE.exists():
-    df, ref, workplaces, holidays = load(str(DEFAULT_FILE))
+    source_key = str(DEFAULT_FILE)
+    df, ref, workplaces, holidays = load(source_key)
     st.sidebar.info(f"기본 파일 사용: data/{DEFAULT_FILE.name}")
 else:
     st.warning("data/ 폴더에 엑셀이 없습니다. 왼쪽에서 파일을 업로드하세요.")
@@ -77,7 +90,7 @@ scored = annotate(apply_rules(df, ref, params), workplaces, params.weights, name
 ALL_RULES = STAGE2_RULES[:-1] + ["R13", "R15"]
 months = sorted(df["승인월"].unique())
 
-tab_sel, tab_trend, tab_tx = st.tabs(["점검대상 선별", "기간 분석", "거래 조회"])
+tab_sel, tab_trend, tab_review, tab_tx = st.tabs(["점검대상 선별", "기간 분석", "검토·결과", "거래 조회"])
 
 # ══ 2단계: 점검대상 선별 ═════════════════════════════════════
 with tab_sel:
@@ -310,6 +323,79 @@ with tab_trend:
             st.dataframe(pd.DataFrame(st.session_state["claude_recs"]), hide_index=True, width="stretch")
     else:
         st.caption("규칙 기반 추천입니다. ANTHROPIC_API_KEY를 설정하면 Claude에게 집계표를 주고 추천을 받을 수 있습니다.")
+
+# ══ 5단계: 검토·결과 ═════════════════════════════════════════
+with tab_review:
+    st.info(AI_NOTICE)
+    rv_month = st.selectbox("점검대상월", months, index=len(months) - 1, key="rv_month")
+    rv_end = pd.Period(rv_month, "M")
+    rv_sel = select_for_month(scored, rv_month)
+    rv_pat = detect_all(prepare(df), rv_end, holidays, tparams)
+    reviews = load_reviews(REVIEW_FILE)
+
+    # ── 검토결과 입력 ──
+    st.subheader("검토결과 입력")
+    st.caption(f"건별로 검토결과(적정/소명요청/부적정)와 검토의견을 입력하고 저장하세요. "
+               f"저장 위치: data/{REVIEW_FILE.name} (원본 데이터와 같이 저장소에는 올라가지 않음)")
+    rv_sel = rv_sel.assign(직원명=rv_sel["직원명"].fillna("(미기재)"))
+    tx_rev = attach_reviews(rv_sel, rv_sel["승인번호"], reviews)
+    pat_rev = attach_reviews(rv_pat, rv_pat["패턴"].str.split().str[0] + "|" + rv_pat["대상"] + "|" + rv_pat["기간"],
+                             reviews) if not rv_pat.empty else rv_pat
+    review_cfg = {
+        "검토결과": st.column_config.SelectboxColumn(options=REVIEW_CHOICES, width="small"),
+        "검토의견": st.column_config.TextColumn(width="medium"),
+    }
+    e1 = st.data_editor(
+        tx_rev[["키", "등급", "검토결과", "검토의견", "위험점수", "승인일시", "직원명", "가맹점명", "전표금액", "걸린 규칙"]],
+        hide_index=True, width="stretch", key=f"edit_tx_{rv_month}",
+        disabled=["키", "등급", "위험점수", "승인일시", "직원명", "가맹점명", "전표금액", "걸린 규칙"],
+        column_config={**review_cfg, "키": st.column_config.TextColumn("승인번호"),
+                       "승인일시": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm"),
+                       "전표금액": st.column_config.NumberColumn(format="localized")},
+    )
+    e2 = None
+    if not rv_pat.empty:
+        st.markdown("**기간 패턴 검토**")
+        e2 = st.data_editor(
+            pat_rev[["키", "검토결과", "검토의견", "지표"]], hide_index=True, width="stretch",
+            key=f"edit_pat_{rv_month}", disabled=["키", "지표"],
+            column_config={**review_cfg, "키": st.column_config.TextColumn("패턴 | 대상 | 기간", width="medium")},
+        )
+    if st.button("검토결과 저장", type="primary"):
+        edited = pd.concat([e1] + ([e2] if e2 is not None else []), ignore_index=True)
+        reviews = save_reviews(REVIEW_FILE, reviews, edited)
+        st.success(f"저장했습니다. 저장된 검토 {len(reviews)}건")
+        tx_rev = attach_reviews(rv_sel, rv_sel["승인번호"], reviews)
+    done = (e1["검토결과"] != "").sum()
+    st.progress(done / max(len(e1), 1), text=f"검토 진행 {done}/{len(e1)}건 (화면 기준, 저장 전 포함)")
+
+    # ── 정답지 대조 ──
+    st.subheader("정답지 대조 (PoC 검증용)")
+    st.caption("정답지 시트는 채점에만 쓰고 선별 판단에는 쓰지 않습니다. 실제 데이터에는 정답지가 없습니다. "
+               "단건(S)·오탐(FP)은 위 점검대상월, 기간(T)은 해당 월 기준 패턴으로 채점합니다.")
+    answers = load_answers(source_key)
+    ev, ev_sum = None, None
+    if answers is None:
+        st.write("이 파일에는 정답지 시트가 없습니다.")
+    else:
+        ev, ev_sum = evaluate(answers, scored, select_for_month(scored, rv_month), rv_pat)
+        cols = st.columns(len(ev_sum))
+        for c, (k, v) in zip(cols, ev_sum.items()):
+            c.metric(k, v)
+        show_fp = st.checkbox("FP(오탐 확인용) 24건도 보기", value=False)
+        view_ev = ev if show_fp else ev[ev["시나리오"] != "FP"]
+        st.dataframe(view_ev, hide_index=True, width="stretch",
+                     column_config={"탐지": st.column_config.CheckboxColumn(),
+                                    "시나리오 설명": st.column_config.TextColumn(width="large")})
+
+    # ── 결과 엑셀 다운로드 ──
+    st.subheader("결과 다운로드")
+    xlsx = build_excel(rv_month, tx_rev, pat_rev if not rv_pat.empty else rv_pat,
+                       recommend(prepare(df), scored, rv_pat), ev, ev_sum)
+    st.download_button("점검결과 엑셀 다운로드 (.xlsx)", xlsx, file_name=f"법인카드_점검결과_{rv_month}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.caption("시트: 점검대상목록(승인번호·승인일시·직원·부서·가맹점·금액·걸린 규칙·위험점수·등급·AI 사유·"
+               "추가확인사항·검토결과·검토의견), 기간패턴분석, AI추천, 정답지대조")
 
 # ══ 1단계: 거래 조회 ═════════════════════════════════════════
 with tab_tx:
