@@ -200,6 +200,8 @@
     if (S.ruleFilter && !R.list.some((r) => r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter))) S.ruleFilter = null;
     if (S.ruleFilter) $("#gradeFilter").insertAdjacentHTML("beforeend", `<button type="button" class="rulef" data-clear-rule="1" aria-pressed="true">${esc(S.ruleFilter)} ${esc(ENGINE.ruleName(S.ruleFilter) === S.ruleFilter ? ENGINE.T_NAMES[S.ruleFilter] || "" : ENGINE.ruleName(S.ruleFilter))} 만 보는 중 ✕</button>`);
     const rows = R.list.filter((r) => (S.grade === "전체" || r.grade === S.grade) && (S.review === "전체" || reviewOf(r) === S.review) && (!S.ruleFilter || r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter)));
+    // 선택한 건이 지금 목록(등급·검토결과·규칙 필터)에 없으면 상세를 닫음
+    if (S.sel && !rows.some((r) => r.no === S.sel)) S.sel = null;
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
     $("#reviewProgress").textContent = `검토 입력 ${done}/${R.list.length}건`;
     // 상세 영역을 표 밖으로 되돌린 뒤 표를 다시 그리고, 선택한 행 바로 아래로 옮김
@@ -222,7 +224,7 @@
 
   function renderDetail() {
     const r = R.list.find((x) => x.no === S.sel);
-    if (!r) { $("#detail").innerHTML = `<p class="empty">행을 누르면 건별 상세, AI 추가 확인사항, 검토결과 입력란이 열립니다.</p>`; return; }
+    if (!r) { $("#detail").innerHTML = `<p class="empty">행을 누르면 그 행 바로 아래에 건별 상세와 검토결과 입력란이 펼쳐집니다.</p>`; return; }
     const rv = S.reviews[r.no] || {};
     $("#detail").innerHTML = `<div class="detail">
       <div class="panel"><h2><span class="g g-${r.grade}">${r.grade}</span> 승인번호 <span class="mono">${r.no}</span> <small>위험점수 ${r.score}${r.adjust ? ` (규칙 ${r.ruleScore}점, AI 조정 ${r.adjust})` : ""}</small></h2>
