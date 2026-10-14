@@ -13,7 +13,7 @@
   const REF_LABELS = REF_SHEETS;
   const S = {
     source: "none", files: [], raw: new Map(), sheetRows: 0, readCount: 0, refRaw: {}, refFiles: {}, answers: null, loadMs: 0,
-    params: { ...ENGINE.DEFAULT_PARAMS }, weights: null, month: null, tab: store.get("cc_tab", "list"), grade: "전체", sel: null,
+    params: { ...ENGINE.DEFAULT_PARAMS }, weights: null, month: null, tab: store.get("cc_tab", "list"), grade: "전체", review: "전체", sel: null,
     reviews: store.get("cc_reviews", {}), ms: 0,
   };
   let R = null; // 계산 결과
@@ -170,10 +170,15 @@
   function renderList() {
     const counts = { 전체: R.list.length, 상: 0, 중: 0, 하: 0 };
     R.list.forEach((r) => counts[r.grade]++);
-    $("#gradeFilter").innerHTML = Object.entries(counts).map(([k, v]) => `<button type="button" data-g="${k}" aria-pressed="${S.grade === k}">${k} <span class="mono">${v}</span></button>`).join("");
+    $("#gradeFilter").innerHTML = `<span class="flabel">등급</span>` + Object.entries(counts).map(([k, v]) => `<button type="button" data-g="${k}" aria-pressed="${S.grade === k}">${k} <span class="mono">${v}</span></button>`).join("");
+    const reviewOf = (r) => S.reviews[r.no]?.result || "미검토";
+    const rcount = { 전체: R.list.length, 미검토: 0, 적정: 0, 소명요청: 0, 부적정: 0 };
+    R.list.forEach((r) => rcount[reviewOf(r)]++);
+    if (!(S.review in rcount)) S.review = "전체";
+    $("#reviewFilter").innerHTML = `<span class="flabel">검토</span>` + Object.entries(rcount).map(([k, v]) => `<button type="button" data-r="${k}" aria-pressed="${S.review === k}">${k} <span class="mono">${v}</span></button>`).join("");
     if (S.ruleFilter && !R.list.some((r) => r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter))) S.ruleFilter = null;
     if (S.ruleFilter) $("#gradeFilter").insertAdjacentHTML("beforeend", `<button type="button" class="rulef" data-clear-rule="1" aria-pressed="true">${esc(S.ruleFilter)} ${esc(ENGINE.ruleName(S.ruleFilter) === S.ruleFilter ? ENGINE.T_NAMES[S.ruleFilter] || "" : ENGINE.ruleName(S.ruleFilter))} 만 보는 중 ✕</button>`);
-    const rows = R.list.filter((r) => (S.grade === "전체" || r.grade === S.grade) && (!S.ruleFilter || r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter)));
+    const rows = R.list.filter((r) => (S.grade === "전체" || r.grade === S.grade) && (S.review === "전체" || reviewOf(r) === S.review) && (!S.ruleFilter || r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter)));
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
     $("#reviewProgress").textContent = `검토 입력 ${done}/${R.list.length}건`;
     $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
@@ -183,7 +188,7 @@
         <td style="white-space:nowrap">${esc(r.emp) || '<span class="ng-txt">미기재</span>'}<div class="muted">${esc(r.dept)}</div></td>
         <td>${esc(r.merchant)}<div class="muted">${esc(r.industry)} · ${esc(r.glName)}</div></td><td class="n">${fmt(r.amount)}</td>
         <td class="reason">${esc(r.reason)}</td><td style="white-space:nowrap">${S.reviews[r.no]?.result ? esc(S.reviews[r.no].result) : '<span class="muted">미검토</span>'}</td></tr>`).join("")
-        : `<tr><td colspan="9" class="empty">이 등급에 해당하는 선별 건이 없습니다.</td></tr>`) + "</tbody>";
+        : `<tr><td colspan="9" class="empty">선택한 조건(등급·검토결과·규칙)에 해당하는 선별 건이 없습니다.</td></tr>`) + "</tbody>";
     renderDetail();
   }
 
@@ -380,6 +385,7 @@
   // ── 이벤트 ──
   $("#tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (!b) return; S.tab = b.dataset.tab; store.set("cc_tab", S.tab); renderTabs(); });
   $("#month").addEventListener("change", (e) => { S.month = e.target.value; S.sel = null; run(); });
+  $("#reviewFilter").addEventListener("click", (e) => { const b = e.target.closest("button[data-r]"); if (!b) return; S.review = b.dataset.r; renderList(); });
   $("#gradeFilter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.clearRule) { S.ruleFilter = null; renderList(); renderRuleDrawer(); return; } S.grade = b.dataset.g; renderList(); });
   $("#listTbl").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-no]"); if (!tr) return; S.sel = S.sel === tr.dataset.no ? null : tr.dataset.no; renderList(); if (S.sel) $("#detail").scrollIntoView({ block: "nearest", behavior: "smooth" }); });
   $("#listTbl").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.closest("tr[data-no]")?.click(); });
