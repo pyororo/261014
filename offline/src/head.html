@@ -143,6 +143,22 @@ mark.ev .ng-txt { color: inherit; }
 .filters { display: flex; gap: 4px; flex-wrap: wrap; }
 .filters button { border: 1px solid var(--rule); background: var(--sheet); border-radius: 999px; padding: 3px 11px; font-size: 13px; }
 .filters button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+/* 등급·검토결과 버튼: 표에서 쓰는 색과 같게 (안 눌림 = 연한 바탕, 눌림 = 진한 바탕) */
+.filters button[data-g="상"] { color: var(--high); background: var(--high-soft); border-color: var(--high-soft); }
+.filters button[data-g="중"] { color: var(--mid); background: var(--mid-soft); border-color: var(--mid-soft); }
+.filters button[data-g="하"] { color: var(--low); background: var(--low-soft); border-color: var(--low-soft); }
+.filters button[data-r="미검토"] { color: var(--ink-2); background: var(--sheet); border-color: var(--rule); }
+.filters button[data-r="적정"] { color: var(--pass); background: var(--pass-soft); border-color: var(--pass-soft); }
+.filters button[data-r="소명요청"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-soft); }
+.filters button[data-r="부적정"] { color: var(--fail); background: var(--row-ng); border-color: var(--high-soft); }
+.filters button[data-g="상"][aria-pressed="true"] { color: var(--sheet); background: var(--high); border-color: var(--high); }
+.filters button[data-g="중"][aria-pressed="true"] { color: var(--sheet); background: var(--mid); border-color: var(--mid); }
+.filters button[data-g="하"][aria-pressed="true"] { color: var(--sheet); background: var(--low); border-color: var(--low); }
+.filters button[data-r="미검토"][aria-pressed="true"] { color: var(--sheet); background: var(--ink-2); border-color: var(--ink-2); }
+.filters button[data-r="적정"][aria-pressed="true"] { color: var(--sheet); background: var(--pass); border-color: var(--pass); }
+.filters button[data-r="소명요청"][aria-pressed="true"] { color: var(--sheet); background: var(--accent); border-color: var(--accent); }
+.filters button[data-r="부적정"][aria-pressed="true"] { color: var(--sheet); background: var(--fail); border-color: var(--fail); }
+.filters button[data-g]:not([data-g="전체"]), .filters button[data-r]:not([data-r="전체"]) { font-weight: 600; }
 
 /* 건별 상세 */
 .detail { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 14px; }
@@ -192,7 +208,6 @@ button.chip:hover { background: var(--accent-soft); }
 .chip .cn { font-family: var(--f-body); }
 .filter-rows { display: grid; gap: 6px; }
 .filters .flabel { font-size: 12px; color: var(--ink-3); align-self: center; min-width: 30px; }
-.filters button[data-r="미검토"][aria-pressed="false"] .mono { color: var(--mid); font-weight: 700; }
 .filters button.rulef { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 /* 점검 규칙표: 왼쪽에 겹쳐 열리는 패널. 본문 위치는 바뀌지 않음 */
 .rules-fab { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; box-shadow: 0 2px 10px rgba(0,0,0,.18); background: var(--accent); border-color: var(--accent); color: var(--sheet); font-weight: 600; }
@@ -266,8 +281,8 @@ button.chip:hover { background: var(--accent-soft); }
     <button class="tab" role="tab" data-tab="answer" id="ansTab" aria-selected="false" hidden>정답지 대조<span class="cnt" id="cntAns"></span></button>
     <button class="tab" role="tab" data-tab="period" aria-selected="false">기간 분석<span class="cnt" id="cntPer"></span></button>
     <button class="tab" role="tab" data-tab="recs" aria-selected="false">추가 점검항목<span class="cnt" id="cntRec"></span></button>
-    <button class="tab" role="tab" data-tab="browse" aria-selected="false">거래 조회</button>
     <button class="tab" role="tab" data-tab="settings" aria-selected="false">점검 기준값 · 추가조건</button>
+    <button class="tab" role="tab" data-tab="browse" aria-selected="false">거래 조회</button>
   </nav>
 
   <section class="needs-data" data-pane="list">
