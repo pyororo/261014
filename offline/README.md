@@ -62,6 +62,7 @@ Python과 Claude를 쓸 수 없는 내부망에서 쓰는 점검 도구입니다
 3. 빌드: `./offline/build.sh 1.1` → `dist/법인카드점검_v1.1.html` 생성
 4. 검증: `node offline/verify.js data/법인카드_가상데이터_202509-202608.xlsx` → 모든 항목이 **통과**여야 반입합니다 (v1.1부터 추가조건 판정 시험 포함 7개).
 5. 아래 변경 이력에 바뀐 내용을 적고, HTML과 함께 반입 신청합니다.
+6. 구글 드라이브 `법인카드점검PoC_교육준비/법인카드점검도구_HTML버전` 폴더([링크](https://drive.google.com/drive/folders/1F2TfKGW3dlr52vkDogSF25Mg0UXiXa-f))의 [버전 목록 문서](https://docs.google.com/document/d/1UwruKMYaYRt9-9KJ_-Ne-BoS6WqNZIvdl6jPRmaY5-M/edit)에 새 버전 행을 추가하고, 새 HTML을 같은 폴더에 올립니다. HTML은 약 1MB라 연결 도구로 올릴 수 없어 사용자가 직접 올립니다.
 
 ## 변경 이력
 
