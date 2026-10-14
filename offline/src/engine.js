@@ -9,9 +9,26 @@ const ENGINE = (() => {
   const RULE_IDS = Object.keys(RULE_NAMES);
   const DEFAULT_WEIGHTS = { R01: 2, R02: 2, R03: 5, R04: 4, R05: 3, R06: 2, R07: 3, R09: 3, R11: 1, R12: 1, R13: 2, R14: 3, R15: 2, R16: 2, R17: 3 };
   const T_NAMES = { "T-R1": "동일가맹점 반복", "T-R2": "사용액 급증", "T-R3": "연말·분기말 집중", "T-R4": "정액 반복" };
-  const DEFAULT_PARAMS = {
-    nightStart: 23, nightEnd: 6, splitGap: 60, memoMin: 5, settleDays: 60, round: 100000, sharedMin: 300000, distGap: 60,
-    t1Count: 8, t2Ratio: 2, t2Floor: 500000, t3Share: 0.5, t3Mult: 1.3, t4Months: 3,
+  const RULE_HELP = {
+    R01: "주말·공휴일 사용은 사적 사용 가능성이 있어 사유와 사전승인을 확인합니다.",
+    R02: "늦은 밤·새벽 사용은 유흥·사적 사용 가능성이 있어 사유를 확인합니다.",
+    R03: "사용지침상 금지 업종(유흥주점·상품권 등)과 사전 품의가 필요한 업종(골프장)을 찾습니다.",
+    R04: "한도를 피하려고 같은 가맹점에서 나눠 결제한 건을 찾습니다.",
+    R05: "계정별 1건 한도를 넘긴 결제를 찾습니다.",
+    R06: "적요가 비었거나 너무 짧은 건, 접대비인데 상대방을 적지 않은 건을 찾습니다.",
+    R07: "계정과목과 가맹점 업종이 맞지 않는 건(예: 소모품비로 음식점 결제)을 찾습니다.",
+    R09: "같은 거래가 두 번 승인되고 취소되지 않은 건을 찾습니다.",
+    R11: "해외 결제는 출장 품의와 환율 적용을 확인합니다.",
+    R12: "10만원 단위로 딱 떨어지는 금액은 정액 지급·상품권 성격일 수 있어 확인합니다.",
+    R13: "결재문서 제목·적요·계정·업종이 서로 맞지 않는 건(예: 제목은 하이패스인데 항공권)을 찾습니다.",
+    R14: "같은 카드가 짧은 시간에 먼 지역에서 쓰인 건(카드 공유·대리 사용 의심)을 찾습니다.",
+    R15: "승인 후 오래 지나 정산한 건을 찾습니다.",
+    R16: "공용카드인데 실제 사용자를 적지 않은 고액 건을 찾습니다.",
+    R17: "휴가 기간에 본인 카드를 쓴 건을 찾습니다.",
+    "T-R1": "한 직원이 같은 가맹점을 3개월간 반복해 쓴 패턴(유착·사적 사용 의심)을 찾습니다.",
+    "T-R2": "직원 월 사용액이 평소보다 크게 늘어난 경우를 찾습니다.",
+    "T-R3": "분기말·연말에 예산 소진성 사용이 몰린 부서를 찾습니다.",
+    "T-R4": "같은 가맹점에 같은 금액을 매달 결제한 패턴을 찾습니다.",
   };
   const TITLES = ["대표", "사장", "회장", "전무", "상무", "이사", "본부장", "지점장", "실장", "부장", "차장", "과장", "팀장", "대리", "원장", "국장", "센터장", "단장", "고객"];
   const COUNTERPART_RE = new RegExp("ㅇㅇㅇ|\\d+\\s*[인명]|" + TITLES.join("|"));
@@ -19,6 +36,21 @@ const ENGINE = (() => {
   const TITLE_KEYWORDS = { 하이패스: ["주유소", "주차장"], 통행료: ["주유소", "주차장"], 주유: ["주유소"], 주차: ["주차장"], 택시: ["택시"], 항공: ["항공사"], 숙박: ["숙박"], 도서: ["서적"] };
   const TRAVEL_WORDS = /출장|이동|택시|귀가|방문|외근|교통/;
   const DIST_EXCLUDE = new Set(["온라인쇼핑", "PG일반(인증)", "해외가맹점", "택시", "항공사", "철도", "주유소", "주차장", "고속버스"]);
+  const DEFAULT_PARAMS = {
+    nightStart: 23, nightEnd: 6, splitGap: 60, memoMin: 5, settleDays: 60, round: 100000, sharedMin: 300000, distGap: 60,
+    t1Count: 8, t2Ratio: 2, t2Floor: 500000, t3Share: 0.5, t3Mult: 1.3, t4Months: 3,
+    // 규칙 수정 화면의 사용 여부·세부 설정 (기본값 = 정답지로 검증한 판단 방식)
+    off: [],
+    holidayExclude: [], nightExclude: [],
+    restrictTargets: ["금지", "사전승인"],
+    splitDays: 0, splitMin: 2,
+    entWords: ["접대비"], counterpart: ["ㅇㅇㅇ", "n인·n명", ...TITLES], bareWords: [],
+    dupKeys: ["카드", "가맹점", "금액", "날짜"],
+    titleMap: Object.entries(TITLE_KEYWORDS).map(([k, v]) => [k, v.join(", ")]),
+    travelAcct: ["여비교통비"], mealInds: ["일반음식점", "일식"], travelWords: ["출장", "이동", "택시", "귀가", "방문", "외근", "교통"],
+    distExclude: [...DIST_EXCLUDE],
+    sharedWords: ["공용"],
+  };
 
   // ── 추가조건(사용자 정의 단건 조건): 기준표 '추가조건' 시트, 같은 조건ID 행은 AND ──
   const OPS = ["같음", "다름", "포함", "미포함", "시작", "이상", "이하", "초과", "미만", "목록중하나", "비어있음", "비어있지않음"];
@@ -176,56 +208,69 @@ const ENGINE = (() => {
 
   // ── 단건·다건 규칙 ──
   function applyRules(all, ref, P, custom = []) {
+    P = { ...DEFAULT_PARAMS, ...P };
     CUSTOM = new Map(custom.map((c) => [c.id, c]));
     const rows = all.filter((r) => !r.excluded);
     for (const r of rows) r.hits = new Set();
-    const hit = (r, id) => r.hits.add(id);
+    const off = new Set(P.off || []);
+    const hit = (r, id) => { if (!off.has(id)) r.hits.add(id); };
+    const has = (list, v) => (list || []).includes(v);
+    const anyWord = (list, text) => (list || []).some((w) => w && text.includes(w));
+    const cpWords = (P.counterpart || []).filter((w) => w !== "n인·n명" && w !== "ㅇㅇㅇ");
+    const cpRe = new RegExp([has(P.counterpart, "ㅇㅇㅇ") ? "ㅇㅇㅇ" : null, has(P.counterpart, "n인·n명") ? "\\d+\\s*[인명]" : null, ...cpWords.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))].filter(Boolean).join("|") || "(?!)");
+    const bare = (P.bareWords || []).filter(Boolean);
+    const titleMap = (P.titleMap || []).filter(([k]) => k).map(([k, v]) => [k, String(v).split(",").map((x) => x.trim()).filter(Boolean)]);
+    const distEx = new Set(P.distExclude || []);
+    const dupKey = (r) => (P.dupKeys || []).map((k) => ({ 카드: r.card, 가맹점: r.merchant, 금액: r.amount, 날짜: r.dkey })[k]).join("|");
     const byKey = (keyFn) => { const m = new Map(); for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
 
     for (const r of rows) {
-      if (r.holiday) hit(r, "R01");
-      if (r.hour >= P.nightStart || r.hour < P.nightEnd) hit(r, "R02");
-      if (r.restrict === "금지" || r.restrict === "사전승인") hit(r, "R03");
+      if (r.holiday && !has(P.holidayExclude, r.industry)) hit(r, "R01");
+      if ((r.hour >= P.nightStart || r.hour < P.nightEnd) && !has(P.nightExclude, r.industry)) hit(r, "R02");
+      if (has(P.restrictTargets, r.restrict)) hit(r, "R03");
       if (r.limit && r.amount > r.limit) hit(r, "R05");
       const memo = r.memo;
-      if (memo.length < P.memoMin || (r.glName.includes("접대비") && !COUNTERPART_RE.test(memo))) hit(r, "R06");
+      if (memo.length < P.memoMin || (anyWord(P.entWords, r.glName) && !cpRe.test(memo)) || (bare.length && bare.includes(memo.replace(/\s/g, "")))) hit(r, "R06");
       if (r.allowed && r.allowed.size && !r.allowed.has(r.industry)) hit(r, "R07");
       if (r.overseas) hit(r, "R11");
       if (r.amount >= P.round && r.amount % P.round === 0) hit(r, "R12");
       if (r.acctDate && (r.acctDate - r.date) / 86400000 > P.settleDays) hit(r, "R15");
-      if (r.kind.includes("공용") && !r.emp && r.amount >= P.sharedMin) hit(r, "R16");
+      if (anyWord(P.sharedWords, r.kind) && !r.emp && r.amount >= P.sharedMin) hit(r, "R16");
       const r13 = r13Check(r);
-      if (r13) { hit(r, "R13"); r.r13Reason = r13; }
+      if (r13 && !off.has("R13")) { hit(r, "R13"); r.r13Reason = r13; }
       if (!r.kind.includes("공용") && (r.empId || r.emp)) { // 휴가 중 본인 카드 사용
         const v = ref.vacations.find((v) => (v.id ? v.id === r.empId : v.name === r.emp) && v.from && v.to && r.date >= v.from && r.date <= v.to);
         if (v) { hit(r, "R17"); r.vacation = v; }
       }
     }
     // R04 분할결제
-    for (const g of byKey((r) => `${r.card}|${r.merchant}|${r.dkey}`).values()) {
-      if (g.length < 2) continue;
+    // 같은 날: 승인 간격 P.splitGap분 이내 연속 결제를 묶음 / N일 이내: 연속 결제 간격이 N일 이내면 묶음
+    const splitDays = Number(P.splitDays) || 0, splitMin = Math.max(2, Number(P.splitMin) || 2);
+    const gapMs = splitDays > 0 ? splitDays * 86400000 : P.splitGap * 60000;
+    for (const g of byKey((r) => (splitDays > 0 ? `${r.card}|${r.merchant}` : `${r.card}|${r.merchant}|${r.dkey}`)).values()) {
+      if (g.length < splitMin) continue;
       g.sort((a, b) => a.dt - b.dt);
       let cluster = [g[0]];
       const flush = () => {
         const lim = cluster[0].limit;
-        if (cluster.length >= 2 && lim && cluster.reduce((s, x) => s + x.amount, 0) > lim) cluster.forEach((x) => { hit(x, "R04"); x.splitSum = cluster.reduce((s, y) => s + y.amount, 0); x.splitN = cluster.length; });
+        if (cluster.length >= splitMin && lim && cluster.reduce((s, x) => s + x.amount, 0) > lim) cluster.forEach((x) => { hit(x, "R04"); x.splitSum = cluster.reduce((s, y) => s + y.amount, 0); x.splitN = cluster.length; });
       };
       for (let i = 1; i < g.length; i++) {
-        if (g[i].dt - g[i - 1].dt > P.splitGap * 60000) { flush(); cluster = []; }
+        if (g[i].dt - g[i - 1].dt > gapMs) { flush(); cluster = []; }
         cluster.push(g[i]);
       }
       flush();
     }
     // R09 중복결제(상계 후 남은 건끼리)
-    for (const g of byKey((r) => `${r.card}|${r.merchant}|${r.amount}|${r.dkey}`).values()) if (g.length >= 2) g.forEach((x) => hit(x, "R09"));
+    if ((P.dupKeys || []).length) for (const g of byKey(dupKey).values()) if (g.length >= 2) g.forEach((x) => hit(x, "R09"));
     // R14 원거리 근접 사용
     for (const g of byKey((r) => r.card).values()) {
       g.sort((a, b) => a.dt - b.dt);
       for (let i = 1; i < g.length; i++) {
         const a = g[i - 1], b = g[i];
-        if (DIST_EXCLUDE.has(a.industry) || DIST_EXCLUDE.has(b.industry)) continue;
+        if (distEx.has(a.industry) || distEx.has(b.industry)) continue;
         const sa = sido(a.addr), sb = sido(b.addr);
-        if (sa && sb && sa !== sb && b.dt - a.dt <= P.distGap * 60000) {
+        if (!off.has("R14") && sa && sb && sa !== sb && b.dt - a.dt <= P.distGap * 60000) {
           const gap = Math.round((b.dt - a.dt) / 60000);
           hit(a, "R14"); hit(b, "R14");
           a.distNote = b.distNote = `${sa} ${a.time} → ${sb} ${b.time} (${gap}분 간격)`;
@@ -252,12 +297,12 @@ const ENGINE = (() => {
     return rows;
 
     function r13Check(r) {
-      for (const [kw, ok] of Object.entries(TITLE_KEYWORDS)) {
+      for (const [kw, ok] of titleMap) {
         if (r.title.includes(kw) && !ok.includes(r.industry)) return `결재문서제목('${r.title}')과 실제 업종(${r.industry})·적요('${r.memo}')가 서로 다름`;
       }
-      if (r.glName.includes("여비교통비") && (r.industry === "일반음식점" || r.industry === "일식")) {
+      if (anyWord(P.travelAcct, r.glName) && has(P.mealInds, r.industry)) {
         const same = r.work && area2(r.addr) === r.work;
-        if (r.memo.includes("회식") || (same && !TRAVEL_WORDS.test(r.memo))) {
+        if (r.memo.includes("회식") || (same && !anyWord(P.travelWords, r.memo))) {
           return `${same ? `근무지(${r.work}) 안` : "출장 표시 없이"} 식사('${r.memo}')를 여비교통비로 처리 — 복리후생비 등 계정 오분류 의심`;
         }
       }
@@ -331,6 +376,12 @@ const ENGINE = (() => {
     return out;
   }
   function periodRules(rows, ref, P, endMonth) {
+    P = { ...DEFAULT_PARAMS, ...P };
+    const res = periodRulesAll(rows, ref, P, endMonth);
+    for (const id of P.off || []) if (res[id]) { for (const x of res[id]) for (const r of x.rows) r.tHits.delete(id); res[id] = []; }
+    return res;
+  }
+  function periodRulesAll(rows, ref, P, endMonth) {
     const result = { "T-R1": [], "T-R2": [], "T-R3": [], "T-R4": [] };
     const months = [...new Set(rows.map((r) => r.month))].sort();
     for (const r of rows) r.tHits = new Set();
@@ -490,7 +541,7 @@ const ENGINE = (() => {
     });
   }
 
-  return { OPS, DERIVED: Object.keys(DERIVED), ruleName, reasonShort, reasonParts, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
+  return { OPS, RULE_HELP, DERIVED: Object.keys(DERIVED), ruleName, reasonShort, reasonParts, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
 })();
 
 
