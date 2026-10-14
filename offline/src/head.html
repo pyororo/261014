@@ -80,6 +80,7 @@ select.btn { padding-right: 8px; }
 /* 탭 */
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
 .tab { border: 0; background: none; padding: 9px 14px; font-size: 14px; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tab[data-tab="browse"] { margin-left: auto; } /* 거래 조회는 점검 흐름과 별개라 오른쪽 끝에 둠 */
 .tab[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .tab .cnt { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); margin-left: 4px; }
 
