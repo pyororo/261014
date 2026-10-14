@@ -225,7 +225,7 @@ button.chip:hover { background: var(--accent-soft); }
 .drawer .rd { font-size: 12.5px; color: var(--ink-2); }
 .drawer .rf { justify-self: start; border: 0; background: none; padding: 0; color: var(--accent); font-size: 12px; cursor: pointer; text-decoration: underline; }
 .drawer .rf:disabled { color: var(--ink-3); text-decoration: none; cursor: default; }
-@media (max-width: 700px) { body.drawer-open .rules-fab { display: none; } }
+@media (max-width: 700px) { body.drawer-open .fab-row { display: none; } }
 .settings input { border: 1px solid var(--rule); border-radius: 5px; padding: 5px 8px; background: var(--sheet); font-family: var(--f-mono); width: 100%; }
 .foot { font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--rule); padding-top: 10px; }
 
@@ -239,6 +239,115 @@ button.chip:hover { background: var(--accent-soft); }
   .kv { grid-template-columns: 80px minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: no-preference) { .tab, .btn, .filters button { transition: background .15s, color .15s, border-color .15s; } }
+/* 점검 규칙 수정 화면 */
+.fab-row { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; gap: 8px; }
+.fab-row .btn { box-shadow: 0 2px 10px rgba(0,0,0,.18); font-weight: 600; }
+.fab-row .edit-fab { background: var(--sheet); border-color: var(--accent); color: var(--accent); }
+.fab-row .rules-fab { position: static; }
+.ed-ov { position: fixed; inset: 0; background: rgba(10,16,14,.42); z-index: 40; display: grid; place-items: center; padding: 20px; }
+.ed { width: min(1060px, 100%); max-height: calc(100vh - 40px); background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.25); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+.ed-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px 10px; }
+.ed-h h2 { font-size: 17px; margin: 0 0 3px; }
+.ed-h p { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+.ed-tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--rule); }
+.ed-tabs button { border: 0; background: none; padding: 8px 12px; font: inherit; font-size: 13px; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.ed-tabs button[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.ed-tabs .n { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); margin-left: 4px; }
+.ed-body { overflow: auto; padding: 4px 20px 12px; }
+.ed table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ed th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--ink-3); padding: 10px 8px 6px; border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--sheet); }
+.ed td { padding: 7px 8px; border-bottom: 1px solid var(--rule-2); vertical-align: middle; }
+.ed tr.chg td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.ed tr.off td:not(:first-child) { color: var(--ink-3); }
+.ed tr.off .cr, .ed tr.off .wt { opacity: .5; }
+.ed .cr { color: var(--ink-2); line-height: 1.9; }
+.ed .cr input, .ed .uc input, .ed .uc select { font-family: var(--f-mono); font-size: 12.5px; border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--sheet); color: var(--ink); }
+.ed .cr input { display: inline-block !important; width: 56px !important; text-align: right; margin: 0 3px; }
+.ed .cr .tag, .ed .was { display: inline !important; width: auto !important; }
+.ed .cr .tag { padding: 1px 6px; }
+.ed .cr input.w { width: 88px !important; }
+.ed input.chg, .ed select.chg { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ed .was { font-size: 11px; color: var(--ink-3); margin-left: 4px; text-decoration: line-through; }
+.tg { position: relative; display: inline-block; width: 34px; height: 20px; border-radius: 10px; background: var(--rule); vertical-align: middle; }
+.tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--sheet); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.tg.on { background: var(--accent); }
+.tg.on::after { left: 16px; }
+.wt { display: inline-flex; align-items: center; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+.wt button { border: 0; background: var(--paper); width: 24px; height: 24px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+.wt span { width: 30px; text-align: center; font-family: var(--f-mono); font-size: 13px; }
+.wt.chg { border-color: var(--accent); }
+.wt.chg span { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.ed .cnt2 { font-family: var(--f-mono); font-size: 12.5px; white-space: nowrap; text-align: right; }
+.ed .cnt2 .up { color: var(--accent); font-weight: 700; }
+.ed .cnt2 .dn { color: var(--ink-3); font-weight: 700; }
+.ed .tag { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); margin-left: 6px; font-weight: 600; vertical-align: 1px; }
+.ed .tag.ban { background: var(--high-soft); color: var(--high); }
+.ed-f { border-top: 1px solid var(--rule); padding: 12px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--paper); }
+.ed-f .sum { font-size: 13px; color: var(--ink-2); margin-right: auto; display: grid; gap: 2px; }
+.ed-f .sum b { color: var(--ink); }
+.ed-f .sum small { color: var(--ink-3); font-size: 11.5px; }
+.ed-f .ghost { border-color: transparent; background: none; color: var(--ink-2); text-decoration: underline; }
+.uc-card { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; margin-top: 12px; display: grid; gap: 8px; }
+.uc-card.chg { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.uc-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.uc-head .nm { font-family: var(--f-body) !important; width: 220px; font-size: 13px !important; }
+.uc-head .meta { margin-left: auto; font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 10px; }
+.uc { display: grid; grid-template-columns: 40px 190px 130px minmax(0,1fr) 28px; gap: 6px; align-items: center; font-size: 12px; color: var(--ink-3); }
+.uc select, .uc input { width: 100%; padding: 4px 6px !important; }
+.uc .x { border: 0; background: none; color: var(--ink-3); font-size: 16px; cursor: pointer; }
+.addline { justify-self: start; border: 1px dashed var(--rule); background: none; color: var(--accent); font-size: 12px; padding: 4px 10px; border-radius: 5px; }
+.addrule { margin-top: 12px; width: 100%; border: 1px dashed var(--accent); background: var(--accent-soft); color: var(--accent); padding: 10px; border-radius: 8px; font-weight: 600; font-size: 13px; }
+.hint { font-size: 12px; color: var(--ink-3); margin: 10px 0 0; }
+.drawer .dh .acts { display: flex; gap: 6px; }
+
+.ed td:nth-child(3){white-space:nowrap}
+.ed-err{margin-top:12px;border-left:3px solid var(--high);background:var(--high-soft);color:var(--ink);padding:8px 12px;border-radius:4px;font-size:12.5px;line-height:1.6}.ed-err b{color:var(--high)}
+
+.ed .more{border:0;background:none;padding:2px 0 0;color:var(--accent);font-size:12px;cursor:pointer}
+.ed .more .tag{margin-left:4px}
+.ed tr.opened td{border-bottom:0}
+.ed tr.drow > td{padding:0 8px 12px;border-bottom:1px solid var(--rule-2)}
+.ed tr.drow > td:first-child{box-shadow:none}
+.dbox{background:var(--paper);border:1px solid var(--rule-2);border-radius:8px;padding:10px 14px;display:grid;gap:10px}
+.df{display:grid;grid-template-columns:180px minmax(0,1fr);gap:10px;align-items:start;font-size:12.5px}
+.df .dl{color:var(--ink-2);font-weight:600;padding-top:5px}
+.df .dv{color:var(--ink-2);line-height:2}
+.df .dh2{font-size:11.5px;color:var(--ink-3);line-height:1.5}
+.df select{font-size:12.5px;border:1px solid var(--rule);border-radius:4px;padding:3px 6px;background:var(--sheet);color:var(--ink)}
+.df input.ni{width:56px;text-align:right;font-family:var(--f-mono);font-size:12.5px;border:1px solid var(--rule);border-radius:4px;padding:2px 6px;background:var(--sheet);color:var(--ink);margin:0 3px}
+.chipset{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;vertical-align:middle;line-height:1.4}
+.ce{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--rule);background:var(--sheet);border-radius:12px;padding:1px 4px 1px 9px;font-size:12px;color:var(--ink)}
+.ce button{border:0;background:none;color:var(--ink-3);font-size:13px;padding:0 3px;cursor:pointer;line-height:1}
+.ce.add{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600}
+.ce.rm{text-decoration:line-through;color:var(--ink-3)}
+.chip-in{border:1px dashed var(--rule);border-radius:12px;padding:2px 9px;font-size:12px;width:120px;background:none;color:var(--ink)}
+table.kw{width:auto!important;border-collapse:collapse;margin-bottom:4px}
+table.kw th{position:static!important;background:none!important;padding:2px 6px!important;font-size:11px}
+table.kw td{padding:2px 6px!important;border:0!important}
+table.kw input{font-size:12.5px;border:1px solid var(--rule);border-radius:4px;padding:2px 6px;background:var(--sheet);color:var(--ink);width:110px}
+table.kw td:nth-child(2) input{width:220px}
+table.kw .x{border:0;background:none;color:var(--ink-3);cursor:pointer}
+
+.ed th{z-index:3}.ed .chgtxt{color:var(--accent);font-weight:600}
+.ed tr.chg + tr.drow > td:first-child{box-shadow:inset 3px 0 0 var(--accent)}table.kw td,table.kw th{box-shadow:none!important}table.kw input{line-height:1.4}.dbox table.kw tr td{vertical-align:middle}.df .dv:has(table.kw){line-height:1.4}
+.ed-ov[hidden] { display: none; }
+button.tg { border: 0; padding: 0; cursor: pointer; flex: none; }
+.uc-card.off > *:not(.uc-head) { opacity: .5; }
+.fab-row .btn:disabled { opacity: 1; }
+.ed-body { padding-top: 0 !important; }
+.ed-f { flex-wrap: nowrap; }
+.ed-f .sum { flex: 1 1 auto; min-width: 0; }
+.ed-f .btn { flex: none; }
+.dbox input[data-p] { width: 64px; text-align: right; font-family: var(--f-mono); font-size: 12.5px; border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--sheet); color: var(--ink); margin: 0 3px; }
+.dbox input[data-p].w { width: 96px; }
+.dbox input[data-p].chg { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.dbox label { white-space: nowrap; margin-right: 12px; }
+@media (max-width: 900px) { .ed-f { flex-wrap: wrap; } }
+.ed .rh2 { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; white-space: normal; max-width: 260px; line-height: 1.45; }
+.ed .cr label { white-space: nowrap; margin-right: 10px; }
+.ed .muted-note { font-size: 12px; color: var(--ink-3); }
+.drawer .rhelp { font-size: 12px; color: var(--ink-3); }
+@media (max-width: 700px) { .ed-ov { padding: 0; } .ed { max-height: 100vh; border-radius: 0; } .df { grid-template-columns: minmax(0,1fr); gap: 2px; } .uc { grid-template-columns: 1fr 1fr; } .uc > span { display: none; } }
 </style>
 </head>
 <body class="is-empty">
@@ -256,7 +365,7 @@ button.chip:hover { background: var(--accent-soft); }
       <button class="btn primary" id="uploadBtn" type="button">엑셀 불러오기</button>
       <button class="btn" id="templateBtn" type="button">기준표 양식 내려받기</button>
       <button class="btn needs-data" id="resetBtn" type="button">불러온 파일 비우기</button>
-      <button class="btn needs-data rules-fab" id="rulesBtn" type="button" aria-controls="ruleDrawer" aria-expanded="false">점검 규칙표</button>
+      <span class="fab-row needs-data"><button class="btn edit-fab" id="editBtn" type="button" aria-haspopup="dialog">✎ 점검 규칙 수정</button><button class="btn rules-fab" id="rulesBtn" type="button" aria-controls="ruleDrawer" aria-expanded="false">점검 규칙표</button></span>
     </div>
   </header>
   <div class="src" id="srcLine"></div>
@@ -282,7 +391,6 @@ button.chip:hover { background: var(--accent-soft); }
     <button class="tab" role="tab" data-tab="answer" id="ansTab" aria-selected="false" hidden>정답지 대조<span class="cnt" id="cntAns"></span></button>
     <button class="tab" role="tab" data-tab="period" aria-selected="false">기간 분석<span class="cnt" id="cntPer"></span></button>
     <button class="tab" role="tab" data-tab="recs" aria-selected="false">추가 점검항목<span class="cnt" id="cntRec"></span></button>
-    <button class="tab" role="tab" data-tab="settings" aria-selected="false">점검 기준값 · 추가조건</button>
     <button class="tab" role="tab" data-tab="browse" aria-selected="false">거래 조회</button>
   </nav>
 
@@ -352,24 +460,21 @@ button.chip:hover { background: var(--accent-soft); }
     <div class="tbl-wrap"><table id="browseTbl"></table></div>
   </section>
 
-  <section class="needs-data" data-pane="settings" hidden>
-    <div class="panel">
-      <h2>기준값 <small>바꾸면 즉시 다시 계산합니다. 기본값은 점검기준(가상) 시트</small></h2>
-      <div class="settings" id="params"></div>
-      <h2 style="margin-top:16px">위험 가중치 <small>등급: 금지업종 → 상 · 6점 이상 상 · 3~5 중 · 1~2 하</small></h2>
-      <div class="settings" id="weights"></div>
-      <div style="margin-top:12px"><button class="btn" id="resetParams" type="button">기본값으로</button></div>
-    </div>
-    <div class="panel" style="margin-top:14px">
-      <h2>추가조건 <small>기준표 '추가조건' 시트에서 읽음 · 시트를 고쳐 다시 불러오면 반영 · HTML 재반입 불필요</small></h2>
-      <div id="customList"></div>
-    </div>
-  </section>
 
   <aside class="drawer" id="ruleDrawer" hidden aria-label="점검 규칙표">
-    <div class="dh"><h2>점검 규칙표</h2><button class="btn" id="ruleClose" type="button">닫기</button></div>
+    <div class="dh"><h2>점검 규칙표</h2><div class="acts"><button class="btn primary" id="ruleEdit" type="button">✎ 규칙 수정</button><button class="btn" id="ruleClose" type="button">닫기</button></div></div>
     <div id="ruleBody"></div>
   </aside>
+
+  <div class="ed-ov" id="ruleEditor" hidden>
+    <div class="ed" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+      <div class="ed-h"><div><h2 id="edTitle">점검 규칙 수정</h2><p id="edSub"></p></div><button class="btn" id="edClose" type="button">닫기</button></div>
+      <div class="ed-tabs" role="tablist" id="edTabs"></div>
+      <div class="ed-body" id="edBody"></div>
+      <div class="ed-f"><div class="sum" id="edSum"></div>
+        <button class="btn ghost" id="edDefault" type="button">기본값으로 되돌리기</button><button class="btn" id="edExport" type="button">기준표 엑셀로 저장</button><button class="btn" id="edCancel" type="button">취소</button><button class="btn primary" id="edApply" type="button">적용</button></div>
+    </div>
+  </div>
 
   <footer class="foot">처리 순서: 엑셀 읽기 → 텍스트 컬럼 정리(G/L 계정·승인시간·예산부서·업종코드) → 승인일시·휴일 계산 → 취소 상계 → R01~R17 → 추가조건(U) → 위험점수·등급 → 사전승인 기재 건 저위험 조정 → T-R1~T-R4. 검토결과·의견은 이 PC의 브라우저에 임시 저장되므로, 반드시 결과 엑셀로 저장해 보관하세요.<br>v1.4 · 엑셀 읽기·쓰기: SheetJS Community Edition 0.18.5 (Apache-2.0, 파일에 포함)</footer>
 </div>

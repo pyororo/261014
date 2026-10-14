@@ -30,7 +30,9 @@
   const REF_LABELS = REF_SHEETS;
   const S = {
     source: "none", files: [], raw: new Map(), sheetRows: 0, readCount: 0, refRaw: {}, refFiles: {}, answers: null, loadMs: 0,
-    params: { ...ENGINE.DEFAULT_PARAMS }, weights: null, month: null, tab: store.get("cc_tab", "list"), grade: "전체", review: "전체", sel: null,
+    params: { ...JSON.parse(JSON.stringify(ENGINE.DEFAULT_PARAMS)), ...(store.get("cc_rules", {}).params || {}) }, weights: null,
+    weightOverride: store.get("cc_rules", {}).weights || null, customRows: store.get("cc_rules", {}).customRows || null,
+    month: null, tab: ["list", "answer", "period", "recs", "browse"].includes(store.get("cc_tab", "list")) ? store.get("cc_tab", "list") : "list", grade: "전체", review: "전체", sel: null,
     reviews: store.get("cc_reviews", {}), ms: 0,
   };
   let R = null; // 계산 결과
@@ -40,19 +42,9 @@
     if (!S.raw.size || !S.refRaw.accounts) { renderEmpty(); return; }
     document.body.classList.remove("is-empty");
     const t0 = performance.now();
-    const ref = ENGINE.buildRef(S.refRaw);
-    const columns = [...new Set([...S.raw.values()].slice(0, 50).flatMap((r) => Object.keys(r)))];
-    const custom = ENGINE.parseCustom(S.refRaw.custom || [], columns);
-    for (const c of custom.rules) ref.weights[c.id] = c.weight;
-    if (S.weights) Object.assign(ref.weights, S.weights);
+    const { ref, prep, rows, months, period, list, custom, columns } = compute(S.params, S.weightOverride, S.customRows || S.refRaw.custom || []);
     S.weights = { ...ref.weights };
-    const prep = ENGINE.prepare([...S.raw.values()], ref);
-    const rows = ENGINE.applyRules(prep.rows, ref, S.params, custom.rules);
-    const months = [...new Set(rows.map((r) => r.month))].sort();
-    if (!S.month || !months.includes(S.month)) S.month = months[months.length - 1];
-    const period = ENGINE.periodRules(rows, ref, S.params, S.month);
     const graded = S.answers && S.answers.length ? ENGINE.grade(rows, S.answers) : null;
-    const list = ENGINE.selectMonth(rows, S.month);
     // 기간 규칙에 걸린 대상월 건도 목록에 표시 (단건 점수 없음 → T 표시만)
     const recs = ENGINE.recommend(rows, ref, S.month);
     const summary = ENGINE.monthlySummary(rows);
@@ -62,13 +54,29 @@
     renderScore();
   }
 
+  // 같은 데이터에 기준값·가중치·추가조건을 넣어 계산 (규칙 수정 화면의 미리보기에도 씀)
+  function compute(params, weightOverride, customRows) {
+    const ref = ENGINE.buildRef(S.refRaw);
+    const columns = [...new Set([...S.raw.values()].slice(0, 50).flatMap((r) => Object.keys(r)))];
+    const custom = ENGINE.parseCustom(customRows, columns);
+    for (const c of custom.rules) ref.weights[c.id] = c.weight;
+    if (weightOverride) for (const [k, v] of Object.entries(weightOverride)) if (k in ref.weights || custom.rules.some((c) => c.id === k)) ref.weights[k] = v;
+    const prep = ENGINE.prepare([...S.raw.values()], ref);
+    const rows = ENGINE.applyRules(prep.rows, ref, params, custom.rules);
+    const months = [...new Set(rows.map((r) => r.month))].sort();
+    if (!S.month || !months.includes(S.month)) S.month = months[months.length - 1];
+    const period = ENGINE.periodRules(rows, ref, params, S.month);
+    const list = ENGINE.selectMonth(rows, S.month);
+    return { ref, prep, rows, months, period, list, custom, columns };
+  }
+
   // ── 렌더 ──
   function render() {
     $("#month").innerHTML = R.months.map((m) => `<option value="${m}" ${m === S.month ? "selected" : ""}>${m.replace("-", "년 ")}월</option>`).join("");
     const refTxt = Object.entries(REF_LABELS).map(([k, v]) => `${v} ${S.refRaw[k]?.length ? "✓" : "–"}`).join(" · ");
     const srcTxt = `<span class="tag">업로드</span> ${S.files.map(esc).join(", ")} · 승인번호 기준 중복 제거 후 ${fmt(S.raw.size)}건 · 기준표: ${refTxt}`;
     $("#srcLine").innerHTML = srcTxt + ` · 분석 대상 ${fmt(R.rows.length)}건 (취소 ${fmt(R.prep.stats.cancels)}건 상계 제외 ${fmt(R.prep.stats.matched * 2)}건${R.prep.stats.unmatched ? `, 미매칭 ${fmt(R.prep.stats.unmatched)}건` : ""})`;
-    renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderSettings(); renderBrowseFilters(); renderBrowse();
+    renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderBrowseFilters(); renderBrowse();
     if (!$("#ruleDrawer").hidden) renderRuleDrawer();
   }
 
@@ -145,18 +153,18 @@
   function ruleDesc(id) {
     const P = S.params, w = (x) => fmt(x);
     const D = {
-      R01: "승인일이 토·일 또는 공휴일 시트에 있는 날",
-      R02: `승인 시각이 ${P.nightStart}시 이후 또는 ${P.nightEnd}시 이전`,
-      R03: "가맹점 업종의 제한구분이 금지 또는 사전승인 (금지 업종은 점수와 관계없이 '상')",
-      R04: `같은 카드·가맹점·날짜에 ${P.splitGap}분 간격 이내로 2건 이상, 합계가 계정 건당 한도 초과`,
+      R01: `승인일이 토·일 또는 공휴일 시트에 있는 날${P.holidayExclude.length ? ` (${P.holidayExclude.join("·")} 제외)` : ""}`,
+      R02: `승인 시각이 ${P.nightStart}시 이후 또는 ${P.nightEnd}시 이전${P.nightExclude.length ? ` (${P.nightExclude.join("·")} 제외)` : ""}`,
+      R03: `가맹점 업종의 제한구분이 ${P.restrictTargets.join(" 또는 ") || "(대상 없음)"} (금지 업종은 점수와 관계없이 '상')`,
+      R04: (P.splitDays || 0) > 0 ? `같은 카드·가맹점에 ${P.splitDays}일 이내로 ${fmt(P.splitMin)}건 이상, 합계가 계정 건당 한도 초과` : `같은 카드·가맹점·날짜에 ${P.splitGap}분 간격 이내로 ${fmt(P.splitMin)}건 이상, 합계가 계정 건당 한도 초과`,
       R05: "전표금액이 계정코드 시트의 건당 한도 초과",
-      R06: `적요가 비었거나 ${P.memoMin}자 미만, 또는 접대비인데 상대방(ㅇㅇㅇ·직함·n인) 표기 없음`,
+      R06: `적요가 비었거나 ${P.memoMin}자 미만, 또는 접대비인데 상대방(ㅇㅇㅇ·직함·n인) 표기 없음${P.bareWords.length ? `, 또는 적요가 '${P.bareWords.join("', '")}'뿐` : ""}`,
       R07: "가맹점 업종이 계정코드 시트의 허용 가맹점업종에 없음",
-      R09: "같은 카드·가맹점·금액·날짜가 2건 이상 (취소로 상계된 건 제외)",
+      R09: `같은 ${P.dupKeys.join("·") || "(기준 없음)"}가 2건 이상 (취소로 상계된 건 제외)`,
       R11: "국내해외코드명이 해외",
       R12: `금액이 ${w(P.round)}원 단위로 떨어지고 ${w(P.round)}원 이상`,
       R13: "결재문서제목의 비용 항목(하이패스·항공·숙박 등)과 업종이 다르거나, 근무지 안 식사·회식을 여비교통비로 처리",
-      R14: `같은 카드의 연속 2건이 시·도가 다르고 ${P.distGap}분 이내 (온라인·교통 업종 제외)`,
+      R14: `같은 카드의 연속 2건이 시·도가 다르고 ${P.distGap}분 이내 (${P.distExclude.length}개 업종 제외: 온라인·교통 등)`,
       R15: `회계일자 − 승인일이 ${P.settleDays}일 초과`,
       R16: `공용카드이고 직원명이 비었으며 금액이 ${w(P.sharedMin)}원 이상`,
       R17: "휴가내역 시트의 휴가 기간 중 본인 카드 사용",
@@ -175,13 +183,13 @@
     R.list.forEach((r) => { r.hits.forEach((h) => (cnt[h] = (cnt[h] || 0) + 1)); r.tHits.forEach((h) => (cnt[h] = (cnt[h] || 0) + 1)); });
     const row = (id, name, weight, kind) => `<li class="rule${S.ruleFocus === id ? " focus" : ""}" id="rule-${esc(id)}">
       <div class="rh"><b class="mono">${esc(id)}</b> <span>${esc(name)}</span>${weight !== null ? `<span class="w">가중치 ${weight}</span>` : ""}</div>
-      <div class="rd">${esc(ruleDesc(id))}</div>
+      ${ENGINE.RULE_HELP[id] ? `<div class="rhelp">${esc(ENGINE.RULE_HELP[id])}</div>` : ""}<div class="rd">${(S.params.off || []).includes(id) ? '<span class="ng-txt">사용 안 함</span> · ' : ""}${esc(ruleDesc(id))}</div>
       <button type="button" class="rf" data-filter="${esc(id)}" ${cnt[id] ? "" : "disabled"}>${S.month} 선별 중 ${fmt(cnt[id] || 0)}건${cnt[id] ? (S.ruleFilter === id ? " · 보는 중" : " · 이 규칙 건만 보기") : ""}</button></li>`;
     const sec = (title, items) => items.length ? `<h3>${title}</h3><ul>${items.join("")}</ul>` : "";
     $("#ruleBody").innerHTML =
       `<p class="muted">위험점수 = 걸린 규칙 가중치 합 · 6점 이상 <span class="g g-상">상</span> 3~5점 <span class="g g-중">중</span> 1~2점 <span class="g g-하">하</span> · 금지 업종은 무조건 상 · 휴일·심야만 걸리고 적요에 사전승인 문서번호가 있으면 규칙당 1점 감점</p>` +
       sec("단건·다건 규칙", ENGINE.RULE_IDS.map((id) => row(id, ENGINE.RULE_NAMES[id], S.weights[id] ?? 0))) +
-      sec(`추가조건 <small>기준표 '추가조건' 시트</small>`, R.custom.rules.map((c) => row(c.id, c.name, S.weights[c.id] ?? c.weight))) +
+      sec(`추가조건 <small>${S.customRows ? "규칙 수정 화면에서 고친 조건" : "기준표 '추가조건' 시트"}</small>`, R.custom.rules.map((c) => row(c.id, c.name, S.weights[c.id] ?? c.weight))) +
       sec("기간 규칙 <small>점수 없이 표시만</small>", Object.keys(ENGINE.T_NAMES).map((id) => row(id, ENGINE.T_NAMES[id], null)));
     if (S.ruleFocus) document.getElementById("rule-" + S.ruleFocus)?.scrollIntoView({ block: "nearest" });
   }
@@ -344,21 +352,293 @@
     $("#recs").innerHTML = base;
   }
 
-  function renderSettings() {
-    const labels = { nightStart: "R02 심야 시작(시, 이상)", nightEnd: "R02 심야 종료(시, 미만)", splitGap: "R04 분할결제 간격(분)", memoMin: "R06 적요 최소 글자수", settleDays: "R15 정산 기한(일)", round: "R12 라운드 단위(원)", sharedMin: "R16 공용카드 기준금액(원)", distGap: "R14 원거리 간격(분)", t1Count: "T-R1 3개월 반복 횟수", t2Ratio: "T-R2 급증 배율", t2Floor: "T-R2 최소 월 사용액(원)", t3Share: "T-R3 월말 비중(0~1)", t3Mult: "T-R3 부서 평균 배수", t4Months: "T-R4 연속 개월" };
-    $("#params").innerHTML = Object.keys(labels).map((k) => `<label for="p_${k}">${labels[k]}<input id="p_${k}" data-p="${k}" data-money type="text" inputmode="decimal" value="${fmt2(S.params[k])}"></label>`).join("");
-    $("#weights").innerHTML = ENGINE.RULE_IDS.concat(R.custom.rules.map((c) => c.id)).map((k) => `<label for="w_${k}">${k} ${esc(ENGINE.ruleName(k))}<input id="w_${k}" data-w="${k}" type="number" min="0" max="10" value="${S.weights[k]}"></label>`).join("");
+  // ── 점검 규칙 수정 화면 ──
+  // 고친 값은 [적용]을 눌러야 반영. 이 PC 브라우저에 기억하고, 기준표 엑셀('규칙설정' 시트)로 내보내 다른 PC에서도 씀
+  const RULE_KEYS = {
+    R01: ["holidayExclude"], R02: ["nightStart", "nightEnd", "nightExclude"], R03: ["restrictTargets"], R04: ["splitDays", "splitGap", "splitMin"],
+    R06: ["memoMin", "entWords", "counterpart", "bareWords"], R09: ["dupKeys"], R12: ["round"], R13: ["titleMap", "travelAcct", "mealInds", "travelWords"],
+    R14: ["distGap", "distExclude"], R15: ["settleDays"], R16: ["sharedMin", "sharedWords"],
+    "T-R1": ["t1Count"], "T-R2": ["t2Ratio", "t2Floor"], "T-R3": ["t3Share", "t3Mult"], "T-R4": ["t4Months"],
+  };
+  const DETAIL_RULES = ["R01", "R02", "R03", "R04", "R06", "R09", "R13", "R14", "R16"];
+  const T_IDS = Object.keys(ENGINE.T_NAMES);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  let D = null, BASE = null, SIM = null, simTimer = null;
+
+  const customFromRule = (c) => ({ id: c.id, name: c.name, weight: S.weights[c.id] ?? c.weight ?? 1, conds: c.conds.map((x) => ({ col: x.col, op: x.op, val: x.val })) });
+  const customToRows = (list) => list.flatMap((c) => c.conds.map((x, i) => ({ 조건ID: c.id, 조건명: i ? "" : c.name, 컬럼: x.col, 비교: x.op, 값: x.val, 가중치: i ? "" : c.weight })));
+  function ruleChanged(id, a, b) {
+    if ((a.params.off || []).includes(id) !== (b.params.off || []).includes(id)) return true;
+    if (!T_IDS.includes(id) && (a.weights[id] ?? 0) !== (b.weights[id] ?? 0)) return true;
+    return (RULE_KEYS[id] || []).some((k) => !same(a.params[k], b.params[k]));
+  }
+  function customChanged(c, a, b) {
+    const o = b.custom.find((x) => x.id === c.id);
+    return !o || !same(c, o) || (a.params.off || []).includes(c.id) !== (b.params.off || []).includes(c.id) || (a.weights[c.id] ?? 0) !== (b.weights[c.id] ?? 0);
+  }
+  function changeCount(a, b) {
+    const ids = [...ENGINE.RULE_IDS, ...T_IDS].filter((id) => ruleChanged(id, a, b)).length;
+    const cus = a.custom.filter((c) => customChanged(c, a, b)).length + b.custom.filter((c) => !a.custom.some((x) => x.id === c.id)).length;
+    return ids + cus;
+  }
+  const monthCounts = (list) => { const n = {}; list.forEach((r) => { r.hits.forEach((h) => (n[h] = (n[h] || 0) + 1)); (r.tHits || new Set()).forEach((h) => (n[h] = (n[h] || 0) + 1)); }); return n; };
+  const gradeCounts = (list) => { const g = { 상: 0, 중: 0, 하: 0 }; list.forEach((r) => g[r.grade] !== undefined && g[r.grade]++); return g; };
+
+  function openEditor(tab) {
+    if (!R) return;
+    BASE = { params: clone(S.params), weights: { ...S.weights }, custom: R.custom.rules.map(customFromRule) };
+    D = { ...clone(BASE), tab: tab || "R", open: new Set() };
+    SIM = null;
+    $("#ruleEditor").hidden = false; document.body.style.overflow = "hidden";
+    renderEditor(); simulate();
+  }
+  function closeEditor() { $("#ruleEditor").hidden = true; document.body.style.overflow = ""; D = null; }
+  function simulate() {
+    clearTimeout(simTimer);
+    simTimer = setTimeout(() => {
+      if (!D) return;
+      try { SIM = compute(D.params, D.weights, customToRows(D.custom)); } catch (e) { console.error(e); SIM = null; }
+      renderEditorCounts();
+    }, 250);
   }
 
-  function renderCustom() {
-    const { rules, errors } = R.custom;
-    const hitN = (id) => R.rows.filter((r) => r.hits.has(id)).length;
-    const monthN = (id) => R.list.filter((r) => r.hits.has(id)).length;
-    $("#customList").innerHTML = (errors.length ? `<div class="notice" style="border-left-color:var(--high)">${errors.map(esc).join("<br>")}</div>` : "") +
-      (rules.length ? `<div class="tbl-wrap"><table><thead><tr><th>ID</th><th>조건명</th><th>조건 (모두 만족)</th><th style="text-align:right">가중치</th><th style="text-align:right">전체 적중</th><th style="text-align:right">${S.month} 선별</th></tr></thead><tbody>` +
-        rules.map((c) => `<tr><td class="mono">${c.id}</td><td>${esc(c.name)}</td><td>${c.conds.map((x) => `<span class="chip">${esc(x.col)} ${esc(x.op)}${x.val !== "" ? " " + esc(condVal(x)) : ""}</span>`).join(" ")}</td><td class="n">${S.weights[c.id]}</td><td class="n">${fmt(hitN(c.id))}</td><td class="n">${fmt(monthN(c.id))}</td></tr>`).join("") + "</tbody></table></div>"
-        : `<p class="empty">기준표에 '추가조건' 시트가 없거나 비어 있습니다. 기준표 양식을 내려받으면 예시가 들어 있습니다.</p>`);
+  // 입력 칸 만들기
+  const pIn = (k, opt = {}) => {
+    const v = D.params[k], was = BASE.params[k], c = !same(v, was);
+    const shown = opt.pct ? fmt2(Math.round(v * 1000) / 10) : fmt2(v);
+    return `<input class="${opt.w ? "w " : ""}${c ? "chg" : ""}" data-p="${k}"${opt.pct ? " data-pct" : ""} data-money inputmode="decimal" value="${shown}" aria-label="${esc(opt.label || k)}">${c ? `<span class="was">${opt.pct ? fmt2(Math.round(was * 1000) / 10) : fmt2(was)}</span>` : ""}`;
+  };
+  const chipsIn = (k, hint) => {
+    const cur = D.params[k] || [], was = BASE.params[k] || [];
+    return `<div class="chipset">${cur.map((x, i) => `<span class="ce${was.includes(x) ? "" : " add"}">${esc(x)}<button type="button" data-ck="${k}" data-ci="${i}" title="빼기" aria-label="${esc(x)} 빼기">×</button></span>`).join("")}${was.filter((x) => !cur.includes(x)).map((x) => `<span class="ce rm">${esc(x)}</span>`).join("")}<input class="chip-in" data-cadd="${k}" placeholder="+ 추가 (Enter)" list="${hint || ""}"></div>`;
+  };
+  const checks = (k, opts) => opts.map((o) => `<label><input type="checkbox" data-cb="${k}" value="${esc(o)}" ${(D.params[k] || []).includes(o) ? "checked" : ""}> ${esc(o)}</label>`).join("");
+  const field = (label, body, help) => `<div class="df"><div class="dl">${label}</div><div class="dv">${body}${help ? `<div class="dh2">${help}</div>` : ""}</div></div>`;
+
+  function critHtml(id) {
+    const P = D.params;
+    const dayTxt = (P.splitDays || 0) > 0 ? `${P.splitDays}일 이내` : "같은 날";
+    return {
+      R01: `승인일이 토·일 또는 공휴일(공휴일 시트)${P.holidayExclude.length ? `, ${esc(P.holidayExclude.join("·"))} 제외` : ""}`,
+      R02: `승인시각 ${pIn("nightStart", { label: "심야 시작" })} 시 이상 또는 ${pIn("nightEnd", { label: "심야 종료" })} 시 미만${P.nightExclude.length ? `, ${esc(P.nightExclude.join("·"))} 제외` : ""}`,
+      R03: `업종코드 시트 제한구분이 ${esc(P.restrictTargets.join("·") || "(없음)")} <span class="tag ban">금지는 점수 무관 '상'</span>`,
+      R04: `같은 카드·가맹점, ${dayTxt} ${fmt(P.splitMin)}건 이상, 합계가 건당 한도 초과${(P.splitDays || 0) > 0 ? "" : `, 간격 ${pIn("splitGap", { label: "분할결제 간격" })} 분 이내`}`,
+      R05: "전표금액이 계정별 건당 한도 초과 (계정코드 시트)",
+      R06: `적요 ${pIn("memoMin", { label: "적요 최소 글자수" })} 자 미만, 접대비인데 상대방 표기 없음${P.bareWords.length ? `, 또는 '${esc(P.bareWords[0])}' 등 단어만 기재` : ""}`,
+      R07: "가맹점업종이 계정의 허용 업종에 없음 (계정코드 시트)",
+      R09: `같은 ${esc(P.dupKeys.join("·") || "(기준 없음)")} 2건 이상, 취소로 상계 안 됨`,
+      R11: "국내해외코드명 = 해외",
+      R12: `금액이 ${pIn("round", { w: 1, label: "라운드 단위" })} 원 단위로 떨어지고 그 이상`,
+      R13: "결재문서제목·적요·계정·업종의 의미가 서로 맞지 않음",
+      R14: `같은 카드 연속 2건이 시·도가 다르고 ${pIn("distGap", { label: "원거리 간격" })} 분 이내 (제외 업종 ${fmt(P.distExclude.length)}개)`,
+      R15: `회계일자 − 승인일이 ${pIn("settleDays", { label: "정산 기한" })} 일 초과`,
+      R16: `공용카드, 직원명 공란, 금액 ${pIn("sharedMin", { w: 1, label: "공용카드 기준금액" })} 원 이상`,
+      R17: "휴가내역 기간 중 본인 카드 사용 (휴가내역 시트)",
+      "T-R1": `같은 직원·가맹점이 최근 3개월 ${pIn("t1Count", { label: "반복 횟수" })} 회 이상`,
+      "T-R2": `직원 월 사용액이 직전 6개월 평균의 ${pIn("t2Ratio", { label: "급증 배율" })} 배 초과, 월 ${pIn("t2Floor", { w: 1, label: "최소 월 사용액" })} 원 이상`,
+      "T-R3": `분기말 월 부서의 월말 5영업일 비중 ${pIn("t3Share", { pct: 1, label: "월말 비중(%)" })} % 초과, 부서 평균의 ${pIn("t3Mult", { label: "부서 평균 배수" })} 배 이상`,
+      "T-R4": `같은 직원·가맹점·금액이 ${pIn("t4Months", { label: "연속 개월" })} 개월 이상 연속`,
+    }[id];
   }
+  function detailHtml(id) {
+    const P = D.params;
+    switch (id) {
+      case "R01": return field("제외 업종", chipsIn("holidayExclude", "dlInd"), "여기 넣은 업종은 휴일에 써도 R01로 보지 않습니다.");
+      case "R02": return field("제외 업종", chipsIn("nightExclude", "dlInd"), "예: 야근 후 귀가 택시를 심야 사용에서 빼려면 '택시'를 넣습니다.");
+      case "R03": return field("대상 제한구분", checks("restrictTargets", ["금지", "사전승인", "주의"]), "업종코드 시트의 제한구분 중 걸리게 할 값입니다. '금지'는 점수와 관계없이 등급 '상'입니다.");
+      case "R04": return field("묶는 범위", `<select data-p="splitDays" class="${same(P.splitDays, BASE.params.splitDays) ? "" : "chg"}">${[0, 1, 2, 3, 5, 7].map((d) => `<option value="${d}" ${+P.splitDays === d ? "selected" : ""}>${d ? `${d}일 이내` : "같은 날"}</option>`).join("")}</select> 같은 카드·같은 가맹점`, "N일 이내로 바꾸면 날짜를 넘겨 나눠 결제한 경우도 묶어 봅니다.") +
+        ((P.splitDays || 0) > 0 ? "" : field("결제 간격", `${pIn("splitGap", { label: "결제 간격" })} 분 이내 연속 결제를 한 묶음으로 봄`)) +
+        field("최소 건수", `${pIn("splitMin", { label: "최소 건수" })} 건 이상`) +
+        field("합계 기준", "계정별 건당 한도 초과", "건당 한도는 기준표 엑셀 '계정코드' 시트 값을 씁니다.");
+      case "R06": return field("최소 글자수", `${pIn("memoMin", { label: "최소 글자수" })} 자 미만이면 부실`) +
+        field("접대비 계정 판단", chipsIn("entWords"), "계정명에 이 단어가 있으면 상대방 표기를 확인합니다.") +
+        field("상대방 표기로 인정", chipsIn("counterpart"), "'n인·n명'은 '3인', '4명'처럼 숫자+인/명, 'ㅇㅇㅇ'은 이름 가림 표기입니다.") +
+        field("이 단어만 적으면 부실", chipsIn("bareWords"), "적요가 이 단어로만 되어 있으면(띄어쓰기 무시) 글자수와 관계없이 부실로 봅니다.");
+      case "R09": return field("같다고 볼 항목", checks("dupKeys", ["카드", "가맹점", "금액", "날짜"]), "체크한 항목이 모두 같은 건이 2건 이상이면 중복결제로 봅니다.");
+      case "R13": return field("제목 단어 ↔ 맞는 업종", `<table class="kw"><thead><tr><th>결재문서제목에 있으면</th><th>실제 업종이 이 중 하나여야 함 (쉼표 구분)</th><th></th></tr></thead><tbody>${P.titleMap.map(([k, v], i) => `<tr><td><input data-tm="${i}" data-tc="0" value="${esc(k)}" aria-label="제목 단어"></td><td><input data-tm="${i}" data-tc="1" value="${esc(v)}" aria-label="맞는 업종"></td><td><button type="button" class="x" data-tmdel="${i}" aria-label="행 삭제">×</button></td></tr>`).join("")}</tbody></table><button class="addline" type="button" data-tmadd>+ 행 추가</button>`) +
+        field("근무지 식사를 여비교통비로", `계정명에 ${chipsIn("travelAcct")} 업종이 ${chipsIn("mealInds", "dlInd")}`, "적요에 '회식'이 있거나, 근무지 안인데 아래 출장 단어가 없으면 표시합니다.") +
+        field("출장으로 인정할 단어", chipsIn("travelWords"));
+      case "R14": return field("간격", `${pIn("distGap", { label: "간격" })} 분 이내, 시·도(주소 앞 2글자)가 다르면`) +
+        field("제외 업종", chipsIn("distExclude", "dlInd"), "위치와 결제 장소가 다를 수 있는 업종(온라인·교통)은 비교하지 않습니다.");
+      case "R16": return field("공용카드 판단", `구분 값에 ${chipsIn("sharedWords")} 이(가) 있으면 공용카드`) + field("기준금액", `${pIn("sharedMin", { w: 1, label: "기준금액" })} 원 이상`);
+    }
+    return "";
+  }
+  function ruleRow(id, isT) {
+    const off = (D.params.off || []).includes(id), chg = ruleChanged(id, D, BASE), open = D.open.has(id);
+    const w = D.weights[id] ?? 0, ww = BASE.weights[id] ?? 0;
+    const name = isT ? ENGINE.T_NAMES[id] : ENGINE.RULE_NAMES[id];
+    const more = DETAIL_RULES.includes(id) ? `<div><button class="more" type="button" data-open="${id}" aria-expanded="${open}">${open ? "세부 설정 접기 ▴" : "세부 설정 ▾"}${RULE_KEYS[id].some((k) => !same(D.params[k], BASE.params[k])) ? ` <span class="tag">변경</span>` : ""}</button></div>` : "";
+    return `<tr class="${chg ? "chg" : ""} ${off ? "off" : ""} ${open ? "opened" : ""}">
+      <td><button type="button" class="tg ${off ? "" : "on"}" role="switch" aria-checked="${!off}" aria-label="${id} 사용" data-off="${id}"></button></td>
+      <td class="mono"><b>${id}</b></td>
+      <td>${esc(name)}${off ? '<span class="tag">사용 안 함</span>' : ""}<div class="rh2">${esc(ENGINE.RULE_HELP[id] || "")}</div>${more}</td>
+      <td class="cr">${critHtml(id)}</td>
+      ${isT ? "" : `<td><span class="wt ${w !== ww ? "chg" : ""}"><button type="button" data-wd="${id}" data-delta="-1" aria-label="가중치 낮춤">−</button><span>${w}</span><button type="button" data-wd="${id}" data-delta="1" aria-label="가중치 높임">+</button></span>${w !== ww ? `<span class="was">${ww}</span>` : ""}</td>`}
+      <td class="cnt2" data-cnt="${id}"></td></tr>` + (open ? `<tr class="drow"><td></td><td colspan="${isT ? 4 : 5}"><div class="dbox">${detailHtml(id)}</div></td></tr>` : "");
+  }
+  function renderEditor() {
+    if (!D) return;
+    const body = $("#edBody"), keep = body.scrollTop;
+    const offU = D.custom.length;
+    $("#edSub").textContent = `바꾼 값은 아래 [적용]을 눌러야 반영됩니다. 오른쪽 숫자는 ${S.month} 선별 건수(현재 → 바꾼 뒤 예상)입니다.`;
+    $("#edTabs").innerHTML = [["R", "단건·다건 규칙", `R ${ENGINE.RULE_IDS.length}`], ["U", "추가조건", `U ${offU}`], ["T", "기간 규칙", `T ${T_IDS.length}`]]
+      .map(([k, t, n]) => `<button type="button" role="tab" data-edtab="${k}" aria-selected="${D.tab === k}">${t}<span class="n">${n}</span></button>`).join("");
+    const inds = [...new Set([...R.ref.industries.values()].map((x) => x.name).concat(R.prep.rows.map((r) => r.industry)).filter(Boolean))].sort();
+    const dl = `<datalist id="dlInd">${inds.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>`;
+    if (D.tab === "R") {
+      body.innerHTML = dl + `<table><thead><tr><th style="width:46px">사용</th><th style="width:48px">ID</th><th style="width:260px">점검항목</th><th>판단 기준 <span style="font-weight:400">(칸 안의 숫자를 바꿀 수 있음)</span></th><th style="width:118px">가중치</th><th style="width:96px;text-align:right">${+S.month.slice(5)}월 선별</th></tr></thead><tbody>${ENGINE.RULE_IDS.map((id) => ruleRow(id)).join("")}</tbody></table>
+        <p class="hint">등급: 금지업종 → 상 · 6점 이상 상 · 3~5점 중 · 1~2점 하 · 휴일·심야만 걸리고 적요에 사전승인 문서번호가 있으면 규칙당 1점 감점. 판단 방식 자체를 바꾸려면 외부망에서 새 버전을 만들어야 합니다.</p>`;
+    } else if (D.tab === "T") {
+      body.innerHTML = `<table><thead><tr><th style="width:46px">사용</th><th style="width:48px">ID</th><th style="width:260px">점검항목</th><th>판단 기준</th><th style="width:96px;text-align:right">${+S.month.slice(5)}월 선별</th></tr></thead><tbody>${T_IDS.map((id) => ruleRow(id, true)).join("")}</tbody></table>
+        <p class="hint">기간 규칙은 위험점수에 더하지 않고 목록에 표시만 합니다. 오른쪽 숫자는 ${esc(S.month)} 선별 목록 중 이 패턴에 해당하는 건수입니다.</p>`;
+    } else body.innerHTML = customHtml();
+    body.scrollTop = keep;
+    renderEditorCounts();
+  }
+  function customHtml() {
+    const errs = R.custom.errors;
+    const cols = [...new Set([...R.columns, ...ENGINE.DERIVED])];
+    const sel = (list, v, attrs, c) => `<select ${attrs} class="${c ? "chg" : ""}">${(list.includes(v) || !v ? list : [v, ...list]).map((x) => `<option ${x === v ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>`;
+    const card = (c, ui) => {
+      const o = BASE.custom.find((x) => x.id === c.id), off = (D.params.off || []).includes(c.id), chg = customChanged(c, D, BASE);
+      const lines = c.conds.map((x, li) => { const ox = o && o.conds[li];
+        return `<div class="uc"><span>${li ? "그리고" : "조건"}</span>${sel(cols, x.col, `data-u="${ui}" data-ul="${li}" data-uf="col" aria-label="컬럼"`, !ox || ox.col !== x.col)}${sel(ENGINE.OPS, x.op, `data-u="${ui}" data-ul="${li}" data-uf="op" aria-label="비교"`, !ox || ox.op !== x.op)}<input class="${!ox || ox.val !== x.val ? "chg" : ""}" data-u="${ui}" data-ul="${li}" data-uf="val" value="${esc(x.op && ["이상", "이하", "초과", "미만"].includes(x.op) ? condVal(x) : x.val)}" aria-label="값"${["이상", "이하", "초과", "미만"].includes(x.op) ? " data-money" : ""}><button type="button" class="x" data-uldel="${ui}" data-ul="${li}" title="이 줄 삭제" aria-label="이 줄 삭제">×</button></div>`; }).join("");
+      return `<div class="uc-card ${chg ? "chg" : ""} ${off ? "off" : ""}"><div class="uc-head"><button type="button" class="tg ${off ? "" : "on"}" role="switch" aria-checked="${!off}" aria-label="${c.id} 사용" data-off="${c.id}"></button><b class="mono">${c.id}</b><input class="nm" data-u="${ui}" data-uf="name" value="${esc(c.name)}" aria-label="조건명" style="border:1px solid var(--rule);border-radius:4px;padding:4px 6px;background:var(--sheet);color:var(--ink)">
+        <span class="meta">가중치 <span class="wt ${(D.weights[c.id] ?? c.weight) !== (o ? BASE.weights[c.id] ?? o.weight : -1) ? "chg" : ""}"><button type="button" data-wd="${c.id}" data-delta="-1" aria-label="가중치 낮춤">−</button><span>${D.weights[c.id] ?? c.weight}</span><button type="button" data-wd="${c.id}" data-delta="1" aria-label="가중치 높임">+</button></span>
+        <span class="cnt2" data-cnt="${c.id}"></span><button type="button" class="x" data-udel="${ui}" style="border:0;background:none;color:var(--ink-3)">삭제</button></span></div>
+        ${lines}<button class="addline" type="button" data-uladd="${ui}">+ 조건 줄 추가 (그리고)</button></div>`;
+    };
+    const next = "U" + String(Math.max(0, ...D.custom.map((c) => +c.id.slice(1) || 0)) + 1).padStart(2, "0");
+    return (errs.length ? `<div class="ed-err"><b>기준표 엑셀의 추가조건 시트에서 ${fmt(errs.length)}행을 적용하지 못했습니다.</b><br>${errs.map(esc).join("<br>")}<br>아래에서 새로 만들거나 엑셀을 고쳐 다시 불러오세요.</div>` : "") +
+      (S.customRows ? `<p class="hint">화면에서 고친 추가조건을 쓰고 있습니다(기준표 엑셀의 추가조건 시트 대신). [기본값으로 되돌리기]를 누르면 기준표 시트 내용으로 돌아갑니다.</p>` : "") +
+      `<p class="hint" style="margin-top:12px">같은 조건ID 안의 줄은 모두 만족해야 걸립니다. 한 건씩 판단하는 조건만 만들 수 있습니다. 숫자 비교(이상·이하·초과·미만)는 숫자로 적습니다.</p>` +
+      D.custom.map(card).join("") + `<button class="addrule" type="button" data-uadd="${next}">+ 새 추가조건 만들기 (${next})</button>`;
+  }
+  function renderEditorCounts() {
+    if (!D) return;
+    const cur = monthCounts(R.list), hitAll = {};
+    R.rows.forEach((r) => r.hits.forEach((h) => (hitAll[h] = (hitAll[h] || 0) + 1)));
+    const sim = SIM ? monthCounts(SIM.list) : null, simAll = {};
+    if (SIM) SIM.rows.forEach((r) => r.hits.forEach((h) => (simAll[h] = (simAll[h] || 0) + 1)));
+    document.querySelectorAll("#edBody [data-cnt]").forEach((el) => {
+      const id = el.dataset.cnt, n = cur[id] || 0, a = sim ? sim[id] || 0 : null;
+      const tail = a === null ? `<span class="muted-note"> …</span>` : a !== n ? ` <span class="${a > n ? "up" : "dn"}">→ ${fmt(a)}</span>` : "";
+      el.innerHTML = id.startsWith("U") ? `전체 적중 ${fmt(hitAll[id] || 0)}${sim && (simAll[id] || 0) !== (hitAll[id] || 0) ? ` → ${fmt(simAll[id] || 0)}` : ""} · ${+S.month.slice(5)}월 선별 ${fmt(n)}${tail}` : `${fmt(n)}${tail}`;
+    });
+    const g0 = gradeCounts(R.list), n0 = R.list.length;
+    const n1 = SIM ? SIM.list.length : null, g1 = SIM ? gradeCounts(SIM.list) : null;
+    $("#edSum").innerHTML = `<span>바꾼 항목 <b>${fmt(changeCount(D, BASE))}개</b> · ${esc(S.month)} 선별 <b>${fmt(n0)}건${n1 !== null && n1 !== n0 ? ` → ${fmt(n1)}건` : ""}</b> (상 ${fmt(g0.상)}${g1 && g1.상 !== g0.상 ? ` → ${fmt(g1.상)}` : ""})</span><small>적용하면 바로 다시 계산하고 이 PC 브라우저에 기억합니다. 다른 PC에서도 쓰려면 기준표 엑셀로 저장하세요.</small>`;
+  }
+
+  // 편집 이벤트
+  const ed = $("#ruleEditor");
+  function editChanged(rerender = true) { if (rerender) renderEditor(); else renderEditorCounts(); simulate(); }
+  ed.addEventListener("click", (e) => {
+    const t = e.target.closest("button"); if (!t || !D) return;
+    const P = D.params;
+    if (t.dataset.edtab) { D.tab = t.dataset.edtab; $("#edBody").scrollTop = 0; renderEditor(); return; }
+    if (t.dataset.off) { const id = t.dataset.off; P.off = P.off.includes(id) ? P.off.filter((x) => x !== id) : [...P.off, id]; return editChanged(); }
+    if (t.dataset.open) { D.open.has(t.dataset.open) ? D.open.delete(t.dataset.open) : D.open.add(t.dataset.open); return renderEditor(); }
+    if (t.dataset.wd) { const id = t.dataset.wd; const c = D.custom.find((x) => x.id === id); const v = Math.min(10, Math.max(0, (D.weights[id] ?? c?.weight ?? 0) + +t.dataset.delta)); D.weights[id] = v; if (c) c.weight = v; return editChanged(); }
+    if (t.dataset.ck) { P[t.dataset.ck] = P[t.dataset.ck].filter((_, i) => i !== +t.dataset.ci); return editChanged(); }
+    if (t.dataset.tmdel !== undefined) { P.titleMap.splice(+t.dataset.tmdel, 1); return editChanged(); }
+    if (t.hasAttribute("data-tmadd")) { P.titleMap.push(["", ""]); return renderEditor(); }
+    if (t.dataset.uldel !== undefined) { const c = D.custom[+t.dataset.uldel]; c.conds.splice(+t.dataset.ul, 1); if (!c.conds.length) c.conds.push({ col: "가맹점업종", op: "같음", val: "" }); return editChanged(); }
+    if (t.dataset.uladd !== undefined) { D.custom[+t.dataset.uladd].conds.push({ col: "전표금액", op: "이상", val: "" }); return renderEditor(); }
+    if (t.dataset.udel !== undefined) { const c = D.custom.splice(+t.dataset.udel, 1)[0]; delete D.weights[c.id]; P.off = P.off.filter((x) => x !== c.id); return editChanged(); }
+    if (t.dataset.uadd) { D.custom.push({ id: t.dataset.uadd, name: "새 조건", weight: 1, conds: [{ col: "가맹점업종", op: "같음", val: "" }] }); D.weights[t.dataset.uadd] = 1; return renderEditor(); }
+  });
+  ed.addEventListener("input", (e) => {
+    const el = e.target; if (!D) return;
+    if (el.dataset.money !== undefined && el.dataset.uf !== "val") commaInput(el);
+    // 글자 입력 중에는 화면을 다시 그리지 않고(커서·클릭 유지) 그 칸의 변경 표시와 건수만 갱신
+    if (el.dataset.p && el.tagName === "INPUT") { const v = unComma(el.value); if (el.value !== "" && isFinite(v)) { const k = el.dataset.p; D.params[k] = el.dataset.pct !== undefined ? v / 100 : v; el.classList.toggle("chg", !same(D.params[k], BASE.params[k])); editChanged(false); } return; }
+    if (el.dataset.tm !== undefined) { D.params.titleMap[+el.dataset.tm][+el.dataset.tc] = el.value; return editChanged(false); }
+    if (el.dataset.u !== undefined && el.tagName === "INPUT") {
+      const c = D.custom[+el.dataset.u];
+      if (el.dataset.uf === "name") c.name = el.value; else c.conds[+el.dataset.ul].val = el.value.trim();
+      return editChanged(false);
+    }
+  });
+  ed.addEventListener("change", (e) => {
+    const el = e.target; if (!D) return;
+    if (el.dataset.p && el.tagName === "SELECT") { D.params[el.dataset.p] = +el.value; return editChanged(); }
+    if (el.dataset.cb) { const k = el.dataset.cb; D.params[k] = [...ed.querySelectorAll(`[data-cb="${k}"]`)].filter((x) => x.checked).map((x) => x.value); return editChanged(); }
+    if (el.dataset.u !== undefined && el.tagName === "SELECT") { D.custom[+el.dataset.u].conds[+el.dataset.ul][el.dataset.uf] = el.value; return editChanged(); }
+  });
+  ed.addEventListener("keydown", (e) => {
+    const el = e.target;
+    if (e.key === "Escape") { closeEditor(); return; }
+    if (e.key === "Enter" && el.dataset.cadd) {
+      e.preventDefault(); const k = el.dataset.cadd, v = el.value.trim();
+      if (v && !D.params[k].includes(v)) { D.params[k] = [...D.params[k], v]; editChanged(); setTimeout(() => ed.querySelector(`[data-cadd="${k}"]`)?.focus(), 0); }
+      else el.value = "";
+    }
+  });
+  ed.addEventListener("click", (e) => { if (e.target === ed) closeEditor(); });
+  $("#edClose").addEventListener("click", closeEditor);
+  $("#edCancel").addEventListener("click", closeEditor);
+  $("#edDefault").addEventListener("click", () => {
+    const sheetW = ENGINE.buildRef(S.refRaw).weights;
+    const sheetCustom = ENGINE.parseCustom(S.refRaw.custom || [], R.columns).rules;
+    D.params = clone(ENGINE.DEFAULT_PARAMS);
+    D.weights = { ...sheetW }; sheetCustom.forEach((c) => (D.weights[c.id] = c.weight));
+    D.custom = sheetCustom.map((c) => ({ id: c.id, name: c.name, weight: c.weight, conds: c.conds.map((x) => ({ col: x.col, op: x.op, val: x.val })) }));
+    D.resetCustom = true;
+    editChanged();
+  });
+  $("#edApply").addEventListener("click", () => {
+    if (!D) return;
+    S.params = clone(D.params);
+    S.weightOverride = { ...D.weights };
+    const rows = customToRows(D.custom);
+    S.customRows = D.resetCustom && same(rows, customToRows(ENGINE.parseCustom(S.refRaw.custom || [], R.columns).rules.map((c) => ({ ...c, weight: D.weights[c.id] ?? c.weight })))) ? null : rows;
+    saveRuleConfig();
+    closeEditor(); run();
+    flash("#editBtn", "적용했습니다");
+  });
+  $("#edExport").addEventListener("click", () => {
+    if (!D) return;
+    const wb = XLSX.utils.book_new();
+    for (const [k, name] of Object.entries(REF_SHEETS)) {
+      let data = S.refRaw[k] && S.refRaw[k].length ? S.refRaw[k] : DEFAULT_REF[k];
+      if (k === "rules") { const ids = new Set(data.map((r) => String(r["규칙ID"]))); data = data.map((r) => (r["규칙ID"] in D.weights ? { ...r, 위험가중치: D.weights[r["규칙ID"]] } : r)); ENGINE.RULE_IDS.filter((id) => !ids.has(id)).forEach((id) => data.push({ 규칙ID: id, 점검항목: ENGINE.RULE_NAMES[id], 위험가중치: D.weights[id] })); }
+      if (k === "custom") data = customToRows(D.custom);
+      XLSX.utils.book_append_sheet(wb, commaSheet(XLSX.utils.json_to_sheet(data.length ? data : [{}])), name);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(configRows(D.params, D.weights)), "규칙설정");
+    saveFile(wb, "card-audit_reference.xlsx");
+    flash("#edExport", "저장했습니다");
+  });
+  // '규칙설정' 시트: 사람이 읽는 설명 + 다시 읽을 값(JSON). 이 시트가 있는 기준표를 불러오면 같은 설정으로 복원
+  function configRows(params, weights) {
+    return [["항목", "값", "설명"],
+      ["params", JSON.stringify(params), "기준값·세부 설정·사용 안 함 규칙 (점검 규칙 수정 화면에서 만든 값, 직접 고치지 마세요)"],
+      ["weights", JSON.stringify(weights), "규칙별 가중치"],
+      ["저장일시", new Date().toLocaleString("ko-KR"), ""]];
+  }
+  function readConfigSheet(rows) {
+    const get = (k) => { const r = rows.find((x) => x["항목"] === k); try { return r ? JSON.parse(r["값"]) : null; } catch { return null; } };
+    const p = get("params"), w = get("weights");
+    if (p) S.params = { ...clone(ENGINE.DEFAULT_PARAMS), ...p };
+    if (w) S.weightOverride = w;
+    S.customRows = null; // 추가조건은 같은 파일의 추가조건 시트를 씀
+    saveRuleConfig();
+  }
+  function saveRuleConfig() { store.set("cc_rules", { params: S.params, weights: S.weightOverride || null, customRows: S.customRows || null }); }
+  // 결과 엑셀 '적용 기준' 시트: 그달 어떤 기준으로 점검했는지 증적
+  function appliedRows() {
+    const def = ENGINE.DEFAULT_PARAMS, sheetW = ENGINE.buildRef(S.refRaw).weights, P = S.params;
+    const diff = (id) => (RULE_KEYS[id] || []).filter((k) => !same(P[k], def[k])).map((k) => `${k}: ${Array.isArray(P[k]) ? JSON.stringify(P[k]) : P[k]} (기본 ${Array.isArray(def[k]) ? JSON.stringify(def[k]) : def[k]})`).join("; ");
+    const out = ENGINE.RULE_IDS.map((id) => ({ 구분: "단건·다건", 규칙ID: id, 점검항목: ENGINE.RULE_NAMES[id], 사용: P.off.includes(id) ? "사용 안 함" : "사용", 가중치: S.weights[id] ?? "", "기준표 가중치": sheetW[id] ?? "", 판단기준: ruleDesc(id), "기본값과 다른 설정": [diff(id), (S.weights[id] ?? 0) !== (sheetW[id] ?? 0) ? `가중치 ${S.weights[id]} (기준표 ${sheetW[id]})` : ""].filter(Boolean).join("; ") }));
+    R.custom.rules.forEach((c) => out.push({ 구분: "추가조건", 규칙ID: c.id, 점검항목: c.name, 사용: P.off.includes(c.id) ? "사용 안 함" : "사용", 가중치: S.weights[c.id] ?? c.weight, "기준표 가중치": "", 판단기준: ruleDesc(c.id), "기본값과 다른 설정": S.customRows ? "화면에서 수정" : "" }));
+    T_IDS.forEach((id) => out.push({ 구분: "기간", 규칙ID: id, 점검항목: ENGINE.T_NAMES[id], 사용: P.off.includes(id) ? "사용 안 함" : "사용", 가중치: "점수 없음", "기준표 가중치": "", 판단기준: ruleDesc(id), "기본값과 다른 설정": diff(id) }));
+    return out;
+  }
+  $("#editBtn").addEventListener("click", () => openEditor());
+  $("#ruleEdit").addEventListener("click", () => { closeRules(); openEditor(T_IDS.includes(S.ruleFocus) ? "T" : S.ruleFocus?.startsWith("U") ? "U" : "R"); });
 
   // ── 거래 조회 ──
   const B = { period: "month", q: "", gl: "", ind: "", dept: "", min: "", max: "", sel: "", hol: false, cancel: false };
@@ -366,7 +646,6 @@
     const all = R.prep.rows;
     const opts = (key) => ["", ...[...new Set(all.map((r) => r[key]).filter(Boolean))].sort()].map((v) => `<option value="${esc(v)}" ${B[{ glName: "gl", industry: "ind", dept: "dept" }[key]] === v ? "selected" : ""}>${v ? esc(v) : "전체"}</option>`).join("");
     $("#b_gl").innerHTML = opts("glName"); $("#b_ind").innerHTML = opts("industry"); $("#b_dept").innerHTML = opts("dept");
-    renderCustom();
   }
   function browseRows() {
     const q = B.q.trim();
@@ -442,14 +721,12 @@
     if (b) { const rv = (S.reviews[S.sel] ||= {}); rv.result = rv.result === b.dataset.v ? "" : b.dataset.v; store.set("cc_reviews", S.reviews); renderList(); return; }
   });
   $("#detail").addEventListener("input", (e) => { if (e.target.id !== "opinion") return; (S.reviews[S.sel] ||= {}).opinion = e.target.value; store.set("cc_reviews", S.reviews); });
-  $("#params").addEventListener("change", (e) => { const k = e.target.dataset.p; if (!k) return; const v = unComma(e.target.value); if (!isFinite(v)) return; S.params[k] = v; run(); });
-  $("#weights").addEventListener("change", (e) => { const k = e.target.dataset.w; if (!k) return; S.weights[k] = Math.max(0, Number(e.target.value) || 0); run(); });
-  $("#resetParams").addEventListener("click", () => { S.params = { ...ENGINE.DEFAULT_PARAMS }; S.weights = null; run(); });
   $("#uploadBtn").addEventListener("click", () => $("#file").click());
   $("#resetBtn").addEventListener("click", () => {
     if ($("#resetBtn").dataset.confirm !== "1") { $("#resetBtn").dataset.confirm = "1"; $("#resetBtn").textContent = "한 번 더 누르면 초기화"; setTimeout(() => { $("#resetBtn").dataset.confirm = ""; $("#resetBtn").textContent = "불러온 파일 비우기"; }, 3000); return; }
     $("#resetBtn").dataset.confirm = ""; $("#resetBtn").textContent = "불러온 파일 비우기";
     Object.assign(S, { source: "none", files: [], raw: new Map(), sheetRows: 0, readCount: 0, refRaw: {}, answers: null, month: null, sel: null, weights: null });
+    closeEditor();
     R = null; renderEmpty();
   });
   $("#templateBtn").addEventListener("click", () => {
@@ -478,6 +755,7 @@
     for (const [k, list] of Object.entries(R.period)) for (const x of list) per.push({ 패턴: `${k} ${ENGINE.T_NAMES[k]}`, 대상: x.who, 부서: x.dept || "", 가맹점: x.merchant || "", 기준월: x.month || "", 지표: k === "T-R1" ? `3개월 ${x.n}회, ${fmt(x.amount)}원 ${x.focus || ""}` : k === "T-R2" ? `${fmt(x.cur)}원 / 직전 6개월 평균 ${fmt(x.avg)}원 (×${x.ratio.toFixed(1)})` : k === "T-R3" ? `월말 5영업일 ${(x.share * 100).toFixed(0)}%, 부서 평균의 ${(x.total / x.avg).toFixed(1)}배` : `${fmt(x.amount)}원 ${x.months}개월 연속`, 관련건수: x.rows.length });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per.length ? per : [{ 패턴: "해당 없음" }]), "기간패턴");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(R.recs.map((r) => ({ 추천항목: r.title, 근거: r.basis, 이유: r.why, 규칙안: r.rule }))), "추가점검항목");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(appliedRows()), "적용기준");
     saveFile(wb, `card-audit_result_${S.month}.xlsx`);
     flash("#xlsxBtn", "저장했습니다");
   });
@@ -519,6 +797,7 @@
           const n = find(SHEETS[key]); if (n) { S.refRaw[key] = read(n); }
         }
         const an = find(SHEETS.answers); if (an) S.answers = read(an);
+        if (wb.SheetNames.includes("규칙설정")) readConfigSheet(read("규칙설정"));
         // 이전에 저장한 결과 엑셀이면 검토결과·의견을 되살림
         const prev = wb.SheetNames.includes("점검대상목록") ? read("점검대상목록") : [];
         let restored = 0;
@@ -530,6 +809,7 @@
       }
     }
     S.source = "upload"; S.month = null; S.sel = null; S.weights = null;
+    closeEditor();
     S.loadMs = performance.now() - t0;
     run();
     if (S.errors?.length) { $("#srcLine").insertAdjacentHTML("beforeend", ` · <span class="ng-txt">읽지 못한 파일: ${S.errors.map(esc).join(", ")}</span>`); S.errors = []; }

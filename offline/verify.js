@@ -43,6 +43,18 @@ const want = { U90: crow.filter((r) => r.industry === "백화점" && r.amount >=
 const sameScore = crow.filter((r) => r.hits.has("U90") && !r.adjust).every((r) => r.ruleScore === [...r.hits].reduce((s, h) => s + (cref.weights[h] || 0), 0));
 checks.push(["추가조건 판정", Object.keys(want).map((k) => `${k} ${got(k)}/${want[k]}`).join(", ") + `, 오류행 ${cp.errors.length}/2`, Object.keys(want).every((k) => got(k) === want[k]) && cp.errors.length === 2 && cp.rules.length === 3 && sameScore]);
 
+// 규칙 수정 화면 설정 시험: 사용 안 함은 0건, 세부 설정을 넓히면 같거나 늘어남, 기본값은 결과 그대로
+const base = (id, rs) => rs.filter((r) => r.hits.has(id)).length;
+const runP = (extra) => ENGINE.applyRules(ENGINE.prepare(tx, ref).rows, ref, { ...ENGINE.DEFAULT_PARAMS, ...extra });
+const d0 = runP({});
+const offN = base("R01", runP({ off: ["R01"] }));
+const bareN = base("R06", runP({ bareWords: ["회의"] }));
+const splitN = base("R04", runP({ splitDays: 3 }));
+const dupN = base("R09", runP({ dupKeys: ["카드", "가맹점", "금액"] }));
+const nightN = base("R02", runP({ nightExclude: ["택시"] }));
+checks.push(["규칙 수정 설정", `R01 끔 ${offN}건, R06 ${base("R06", d0)}→${bareN}, R04 ${base("R04", d0)}→${splitN}, R09 ${base("R09", d0)}→${dupN}, R02 택시 제외 ${base("R02", d0)}→${nightN}`,
+  offN === 0 && bareN >= base("R06", d0) && splitN >= base("R04", d0) && dupN >= base("R09", d0) && nightN <= base("R02", d0) && d0.length === rows.length && d0.every((r, i) => r.score === rows[i].score)]);
+
 for (const [k, v, ok] of checks) console.log(`${ok ? "통과" : "실패"}  ${k}: ${v}`);
 for (const o of g.list.filter((o) => o.type !== "FP" && !o.detected)) console.log(`  미탐 ${o.id} ${o.title} — ${o.note}`);
 process.exit(checks.every((c) => c[2]) ? 0 : 1);
