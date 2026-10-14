@@ -107,7 +107,7 @@
   const ruleChips = (r) => [...r.hits].sort().map((h) => chip(h, ` cat-${catOf(h)}${h === "R03" && r.restrict === "금지" ? " ban-hard" : ""}${h.startsWith("U") ? " u" : ""}`)).join("") + [...(r.tHits || [])].map((h) => chip(h, " t cat-period")).join("");
   // 근거가 있는 칸에 붙일 강조 class
   // 걸린 규칙별로 담당자가 확인할 칸(형광펜 위치)
-  const RULE_SPOTS = { R01: ["day"], R02: ["time"], R03: ["ind"], R04: ["amt"], R05: ["amt"], R06: ["memo"], R07: ["ind", "gl"], R09: ["amt"], R11: ["mer"], R12: ["amt"],
+  const RULE_SPOTS = { R01: ["day"], R02: ["time"], R03: ["ind"], R04: ["amt"], R05: ["amt"], R06: ["memo"], R07: ["gl"], R09: ["amt"], R11: ["mer"], R12: ["amt"],
     R13: ["memo", "gl", "title"], R14: ["time", "mer"], R15: ["settle"], R16: ["who"], R17: ["who", "day"] };
   const COL_SPOT = { 가맹점업종: "ind", 업종코드: "ind", 제한구분: "ind", 전표금액: "amt", "전표 품목 텍스트": "memo", "G/L 계정명": "gl", "G/L 계정": "gl", 가맹점명: "mer", 가맹점주소: "mer", 시도: "mer",
     직원명: "who", 요일: "day", 휴일: "day", 공휴일명: "day", 승인일: "day", 승인시: "time", 승인시간: "time", 결재문서제목: "title" };
@@ -116,11 +116,9 @@
     const add = (spot, id) => { if (!spots.has(spot)) spots.set(spot, []); spots.get(spot).push(`${id} ${ENGINE.ruleName(id)}`); };
     const spotsOf = (id) => RULE_SPOTS[id] || (R.custom.rules.find((x) => x.id === id)?.conds.map((x) => COL_SPOT[x.col]).filter(Boolean) ?? []);
     for (const id of r.hits) spotsOf(id).forEach((s) => add(s, id));
-    // 1순위 규칙(금지업종 → 가중치 큰 순)의 칸만 평소에도 형광펜, 나머지는 점선 밑줄
-    const w = (id) => (id === "R03" && r.restrict === "금지" ? 99 : S.weights[id] ?? 0);
-    const top = [...r.hits].filter((id) => spotsOf(id).length).sort((a, b) => w(b) - w(a) || a.localeCompare(b))[0];
-    const primary = new Set(top ? spotsOf(top) : []);
-    const m = (spot, html) => (spots.has(spot) ? `<mark class="hl${primary.has(spot) ? " p" : ""}" title="확인할 부분: ${esc([...new Set(spots.get(spot))].join(", "))}">${html}</mark>` : html);
+    // 근거 종류별 표시: 시각·요일·금액·사람·가맹점 = 빨강 굵게, 업종 = 금지 빨간 바탕/그 외 주황, 계정 = 보라 물결 밑줄, 적요·제목 = 노란 형광펜
+    const kind = (spot) => (spot === "ind" ? (r.restrict === "금지" ? "ev-ban" : "ev-warn") : spot === "gl" ? "ev-wave" : spot === "memo" || spot === "title" ? "ev-memo" : "ev-red");
+    const m = (spot, html) => (spots.has(spot) ? `<mark class="ev ${kind(spot)}" title="확인할 부분: ${esc([...new Set(spots.get(spot))].join(", "))}">${html}</mark>` : html);
     m.has = (spot) => spots.has(spot);
     return m;
   }
