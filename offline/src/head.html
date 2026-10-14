@@ -100,7 +100,12 @@ tr.sev-중 td:first-child { box-shadow: inset 3px 0 0 var(--mid); }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--rule); border-radius: 3px; padding: 0 5px; white-space: nowrap; color: var(--ink-2); }
 .chip.t { border-color: var(--accent); color: var(--accent); }
-.reason { color: var(--ink-2); min-width: 280px; }
+.reason { color: var(--ink-2); min-width: 240px; }
+td.mer { min-width: 200px; }
+.memo-line { display: flex; gap: 6px; align-items: baseline; margin-top: 4px; color: var(--ink); }
+.memo-line .lbl { flex: none; font-size: 11px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 1.5; }
+.rv { font-size: 12px; white-space: nowrap; }
+.rv-미검토 { color: var(--ink-3); }
 .muted { color: var(--ink-3); }
 .ok-txt { color: var(--pass); font-weight: 600; }
 .ng-txt { color: var(--fail); font-weight: 600; }

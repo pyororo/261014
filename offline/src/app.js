@@ -101,7 +101,13 @@
   const short = (s) => (s.length > 11 ? s.slice(0, 10) + "…" : s);
   const chip = (id, cls) => { const name = ENGINE.ruleName(id) === id ? ENGINE.T_NAMES[id] || id : ENGINE.ruleName(id);
     return `<button type="button" class="chip${cls}" data-rule="${esc(id)}" title="${esc(id)} ${esc(name)} · 눌러서 규칙 설명 보기">${esc(id)} <span class="cn">${esc(short(name))}</span></button>`; };
-  const ruleChips = (r) => [...r.hits].sort().map((h) => chip(h, h.startsWith("U") ? " u" : "")).join("") + [...(r.tHits || [])].map((h) => chip(h, " t")).join("");
+  // 규칙 성격별 분류: 칩 색과 칸 강조에 씀
+  const RULE_CAT = { R03: "ban", R04: "money", R05: "money", R09: "money", R12: "money", R01: "when", R02: "when", R11: "when", R14: "when", R17: "when", R06: "doc", R07: "doc", R13: "doc", R15: "doc", R16: "doc" };
+  const catOf = (id) => RULE_CAT[id] || (id.startsWith("T-") ? "period" : id.startsWith("U") ? "user" : "doc");
+  const ruleChips = (r) => [...r.hits].sort().map((h) => chip(h, ` cat-${catOf(h)}${h === "R03" && r.restrict === "금지" ? " ban-hard" : ""}${h.startsWith("U") ? " u" : ""}`)).join("") + [...(r.tHits || [])].map((h) => chip(h, " t cat-period")).join("");
+  // 근거가 있는 칸에 붙일 강조 class
+  const hitCls = (r, ids) => (ids.some((id) => r.hits.has(id)) ? " hit" : "");
+  const reviewPill = (r) => { const v = S.reviews[r.no]?.result || "미검토"; return `<span class="rv rv-${v}">${v}</span>`; };
 
   // ── 점검 규칙표 (오른쪽 패널) ──
   function ruleDesc(id) {
@@ -181,13 +187,16 @@
     const rows = R.list.filter((r) => (S.grade === "전체" || r.grade === S.grade) && (S.review === "전체" || reviewOf(r) === S.review) && (!S.ruleFilter || r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter)));
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
     $("#reviewProgress").textContent = `검토 입력 ${done}/${R.list.length}건`;
-    $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
-      (rows.length ? rows.map((r) => `<tr class="click sev-${r.grade} ${S.sel === r.no ? "on" : ""}" data-no="${r.no}" tabindex="0">
-        <td><span class="g g-${r.grade}">${r.grade}</span></td><td class="n">${r.score}${r.adjust ? `<div class="muted" title="AI 오탐 조정">${r.ruleScore}→${r.score}</div>` : ""}</td>
-        <td><div class="chips">${ruleChips(r)}</div></td><td class="mono" style="white-space:nowrap">${r.dkey.slice(5)} ${r.time}<div class="muted">${r.holName || r.wdName}</div></td>
-        <td style="white-space:nowrap">${esc(r.emp) || '<span class="ng-txt">미기재</span>'}<div class="muted">${esc(r.dept)}</div></td>
-        <td>${esc(r.merchant)}<div class="muted">${esc(r.industry)} · ${esc(r.glName)}</div></td><td class="n">${fmt(r.amount)}</td>
-        <td class="reason">${esc(r.reason)}</td><td style="white-space:nowrap">${S.reviews[r.no]?.result ? esc(S.reviews[r.no].result) : '<span class="muted">미검토</span>'}</td></tr>`).join("")
+    $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점 · 적요</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
+      (rows.length ? rows.map((r) => `<tr class="click sev-${r.grade} rvrow-${S.reviews[r.no]?.result || "미검토"} ${S.sel === r.no ? "on" : ""}" data-no="${r.no}" tabindex="0">
+        <td><span class="g g-${r.grade}">${r.grade}</span></td><td class="n scorecell">${r.score}${r.adjust ? `<div class="muted" title="사전승인 기재로 조정">${r.ruleScore}→${r.score}</div>` : ""}</td>
+        <td><div class="chips">${ruleChips(r)}</div></td>
+        <td class="mono when" style="white-space:nowrap"><span class="t${hitCls(r, ["R02"])}">${r.dkey.slice(5)} ${r.time}</span><div class="d${hitCls(r, ["R01", "R17"])}">${r.holName || r.wdName}${r.hits.has("R17") ? " · 휴가 중" : ""}</div>${r.hits.has("R15") ? `<div class="d hit">정산 ${Math.round((r.acctDate - r.date) / 86400000)}일</div>` : ""}</td>
+        <td style="white-space:nowrap" class="who${hitCls(r, ["R16", "R17"])}">${esc(r.emp) || '<span class="ng-txt">미기재</span>'}<div class="muted">${esc(r.dept)}</div></td>
+        <td class="mer"><span class="mn">${esc(r.merchant)}</span><div class="muted"><span class="ind${r.hits.has("R03") ? (r.restrict === "금지" ? " hit ban-hard" : " hit") : ""}">${esc(r.industry)}</span> · <span class="gl${hitCls(r, ["R07", "R13"])}">${esc(r.glName)}</span></div>
+          <div class="memo-line${hitCls(r, ["R06", "R13"])}"><span class="lbl">적요</span><span class="mt">${r.memo ? esc(r.memo) : '<span class="ng-txt">적요 공란</span>'}</span></div></td>
+        <td class="n amt${hitCls(r, ["R04", "R05", "R09", "R12"])}">${fmt(r.amount)}${r.limit && r.hits.has("R05") ? `<div class="muted">한도 ${fmt(r.limit)}</div>` : ""}</td>
+        <td class="reason">${esc(ENGINE.reasonShort(r))}</td><td style="white-space:nowrap">${reviewPill(r)}</td></tr>`).join("")
         : `<tr><td colspan="9" class="empty">선택한 조건(등급·검토결과·규칙)에 해당하는 선별 건이 없습니다.</td></tr>`) + "</tbody>";
     renderDetail();
   }
