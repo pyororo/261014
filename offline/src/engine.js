@@ -93,6 +93,7 @@ const ENGINE = (() => {
   const area2 = (addr) => str(addr).split(/\s+/).slice(0, 2).join(" ");
   const monthKey = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
   const won = (x) => Math.round(x).toLocaleString("ko-KR") + "원";
+  const nf = (x) => Math.round(x).toLocaleString("ko-KR");
 
   // ── 기준표 정리 ──
   function buildRef(raw) {
@@ -418,14 +419,14 @@ const ENGINE = (() => {
         const tIds = expectIds.filter((e) => e.startsWith("T-"));
         const tHit = items.filter((i) => i.row && tIds.some((e) => i.row.tHits.has(e)));
         detected = tHit.length > 0;
-        note = detected ? `${tHit.length}/${items.length}건에 ${tIds.join("·")} 표시` : "기간 규칙 미탐";
+        note = detected ? `${nf(tHit.length)}/${nf(items.length)}건에 ${tIds.join("·")} 표시` : "기간 규칙 미탐";
       } else if (type === "FP") {
         detected = null;
       } else {
         const ok = items.filter((i) => i.row && i.row.score > 0);
         detected = ok.length === items.length;
         const matched = expectIds.filter((e) => items.some((i) => i.row && i.row.hits.has(e)));
-        note = detected ? (matched.length ? `기대규칙 ${matched.join("·")} 적중` : "선별됨(다른 규칙)") : `${items.length - ok.length}건 미선별`;
+        note = detected ? (matched.length ? `기대규칙 ${matched.join("·")} 적중` : "선별됨(다른 규칙)") : `${nf(items.length - ok.length)}건 미선별`;
       }
       out.push({ id, type, title: str(g[0]["시나리오"]), expect: expectIds.join(", "), items, detected, note });
     }
@@ -447,33 +448,33 @@ const ENGINE = (() => {
     const near = recent.filter((r) => r.limit && r.amount >= r.limit * 0.9 && r.amount <= r.limit);
     const nearBy = [...groupBy(near, (r) => r.emp || r.card)].sort((a, b) => b[1].length - a[1].length);
     recs.push({
-      title: "건당 한도 90~100% 구간 결제 집중", basis: `최근 3개월 ${near.length}건이 계정 한도의 90~100% 구간` + (nearBy.length ? `, 최다 ${nearBy[0][0]} ${nearBy[0][1].length}건` : ""),
+      title: "건당 한도 90~100% 구간 결제 집중", basis: `최근 3개월 ${nf(near.length)}건이 계정 한도의 90~100% 구간` + (nearBy.length ? `, 최다 ${nearBy[0][0]} ${nf(nearBy[0][1].length)}건` : ""),
       why: "한도를 의식한 금액 조정(분할결제의 변형) 가능성. R05는 초과분만 잡음", rule: "직원별 3개월 내 한도 90% 이상 결제 3건 이상", count: near.length,
     });
     // 2) 같은 날 같은 가맹점 다른 카드 결제 (카드 분산)
     const multi = [...groupBy(recent, (r) => `${r.merchant}|${r.dkey}`).values()].filter((g) => new Set(g.map((r) => r.card)).size >= 2);
     recs.push({
-      title: "같은 날 같은 가맹점, 서로 다른 카드 결제", basis: `최근 3개월 ${multi.length}개 가맹점-일자에서 2장 이상 카드 사용`,
+      title: "같은 날 같은 가맹점, 서로 다른 카드 결제", basis: `최근 3개월 ${nf(multi.length)}개 가맹점-일자에서 2장 이상 카드 사용`,
       why: "한 자리 비용을 여러 사람 카드로 나눠 R04(동일 카드)를 피하는 패턴", rule: "가맹점·승인일 동일, 카드 2장 이상, 합계 > 건당한도", count: multi.length,
     });
     // 3) 적요 문구 복사 반복
     const memoDup = [...groupBy(recent.filter((r) => r.memo.length >= 5), (r) => `${r.emp}|${r.memo}`).values()].filter((g) => g.length >= 4);
     recs.push({
-      title: "같은 적요 문구 반복 사용", basis: `최근 3개월 동일 직원이 같은 적요를 4회 이상 쓴 경우 ${memoDup.length}건` + (memoDup.length ? ` (예: '${memoDup[0][0].memo}' ${memoDup[0].length}회)` : ""),
+      title: "같은 적요 문구 반복 사용", basis: `최근 3개월 동일 직원이 같은 적요를 4회 이상 쓴 경우 ${nf(memoDup.length)}건` + (memoDup.length ? ` (예: '${memoDup[0][0].memo}' ${nf(memoDup[0].length)}회)` : ""),
       why: "실제 상대방·목적이 바뀌어도 적요를 복사해 형식만 맞추는 경우. R06은 형식만 확인", rule: "직원×적요 3개월 4회 이상 → 상대방 실명 증빙 확인", count: memoDup.length,
     });
     // 4) 금요일 저녁 접대비 집중
     const fri = recent.filter((r) => r.glName.includes("접대비") && r.wd === 5 && r.hour >= 18);
     const ent = recent.filter((r) => r.glName.includes("접대비"));
     recs.push({
-      title: "금요일 저녁 접대비 비중", basis: `최근 3개월 접대비 ${ent.length}건 중 금요일 18시 이후 ${fri.length}건(${ent.length ? Math.round((fri.length / ent.length) * 100) : 0}%)`,
+      title: "금요일 저녁 접대비 비중", basis: `최근 3개월 접대비 ${nf(ent.length)}건 중 금요일 18시 이후 ${nf(fri.length)}건(${ent.length ? Math.round((fri.length / ent.length) * 100) : 0}%)`,
       why: "주말 직전 사적 모임을 접대비로 처리하는 경우가 많은 시간대", rule: "직원별 접대비 중 금요일 저녁 비중 50% 이상", count: fri.length,
     });
     // 5) 월말 마지막 영업일 접대비 정액
     const lastDays = new Set(win3.map((m) => businessDays(m, ref).slice(-1)[0]));
     const endEnt = recent.filter((r) => lastDays.has(r.dkey) && r.glName.includes("접대비"));
     recs.push({
-      title: "월 마지막 영업일 접대비 결제", basis: `최근 3개월 마지막 영업일 접대비 ${endEnt.length}건, ${won(sum(endEnt))}`,
+      title: "월 마지막 영업일 접대비 결제", basis: `최근 3개월 마지막 영업일 접대비 ${nf(endEnt.length)}건, ${won(sum(endEnt))}`,
       why: "잔여 예산 소진·선결제 목적의 월말 결제 의심. T-R3은 부서·분기말만 봄", rule: "직원별 월 마지막 영업일 접대비 2개월 이상", count: endEnt.length,
     });
     return recs.sort((a, b) => b.count - a.count);

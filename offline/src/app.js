@@ -4,6 +4,23 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const won = ENGINE.won;
   const fmt = (n) => Math.round(n).toLocaleString("ko-KR");
+  // 천 단위 쉼표: 소수는 그대로 두고 정수부만 끊음 (0.5 → 0.5, 300000 → 300,000)
+  const fmt2 = (n) => Number(n).toLocaleString("ko-KR", { maximumFractionDigits: 4 });
+  const unComma = (v) => Number(String(v).replace(/[,\s원]/g, ""));
+  const commaInput = (el) => { const raw = el.value.replace(/[^\d.]/g, ""); if (raw === "" || raw.endsWith(".")) { el.value = raw; return; } el.value = fmt2(Number(raw)); };
+  const condVal = (x) => (["이상", "이하", "초과", "미만"].includes(x.op) && isFinite(unComma(x.val)) ? fmt2(unComma(x.val)) : x.val);
+  // 엑셀 저장: 금액 성격 컬럼은 숫자 그대로 두고 표시 형식만 #,##0 (승인번호·계정코드 같은 번호 컬럼은 제외)
+  const MONEY_COL = /금액|한도|사용액|평균|합계|공급가액|부가세|봉사료|지표값/;
+  function commaSheet(ws) {
+    if (!ws["!ref"]) return ws;
+    const rg = XLSX.utils.decode_range(ws["!ref"]);
+    for (let c = rg.s.c; c <= rg.e.c; c++) {
+      const h = ws[XLSX.utils.encode_cell({ r: rg.s.r, c })];
+      if (!h || !MONEY_COL.test(String(h.v))) continue;
+      for (let r = rg.s.r + 1; r <= rg.e.r; r++) { const cell = ws[XLSX.utils.encode_cell({ r, c })]; if (cell && cell.t === "n") cell.z = "#,##0"; }
+    }
+    return ws;
+  }
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
@@ -50,7 +67,7 @@
     $("#month").innerHTML = R.months.map((m) => `<option value="${m}" ${m === S.month ? "selected" : ""}>${m.replace("-", "년 ")}월</option>`).join("");
     const refTxt = Object.entries(REF_LABELS).map(([k, v]) => `${v} ${S.refRaw[k]?.length ? "✓" : "–"}`).join(" · ");
     const srcTxt = `<span class="tag">업로드</span> ${S.files.map(esc).join(", ")} · 승인번호 기준 중복 제거 후 ${fmt(S.raw.size)}건 · 기준표: ${refTxt}`;
-    $("#srcLine").innerHTML = srcTxt + ` · 분석 대상 ${fmt(R.rows.length)}건 (취소 ${R.prep.stats.cancels}건 상계 제외 ${R.prep.stats.matched * 2}건${R.prep.stats.unmatched ? `, 미매칭 ${R.prep.stats.unmatched}건` : ""})`;
+    $("#srcLine").innerHTML = srcTxt + ` · 분석 대상 ${fmt(R.rows.length)}건 (취소 ${fmt(R.prep.stats.cancels)}건 상계 제외 ${fmt(R.prep.stats.matched * 2)}건${R.prep.stats.unmatched ? `, 미매칭 ${fmt(R.prep.stats.unmatched)}건` : ""})`;
     renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderSettings(); renderBrowseFilters(); renderBrowse();
     if (!$("#ruleDrawer").hidden) renderRuleDrawer();
   }
@@ -61,16 +78,16 @@
     const crit = [
       { lbl: "데이터 읽기", val: `${fmt(S.readCount)}<small> / ${fmt(S.sheetRows)}행</small>`, tgt: "원본 행수와 읽은 건수 일치", ok: S.readCount === S.sheetRows && S.sheetRows > 0 },
       { lbl: "업로드 → 목록 표시", val: `${(S.ms / 1000).toFixed(2)}<small> 초</small>`, tgt: "1분 이내", ok: S.ms < 60000 },
-      { lbl: `${S.month.replace("-", "년 ")}월 선별`, val: `${R.list.length}<small> 건</small>`, tgt: `상 ${cnt.상} · 중 ${cnt.중} · 하 ${cnt.하}`, ok: undefined },
+      { lbl: `${S.month.replace("-", "년 ")}월 선별`, val: `${fmt(R.list.length)}<small> 건</small>`, tgt: `상 ${fmt(cnt.상)} · 중 ${fmt(cnt.중)} · 하 ${fmt(cnt.하)}`, ok: undefined },
     ];
     if (g) crit.push(
       { lbl: "정답지 단건 탐지", val: `${g.sHit}<small> / ${g.S.length}종</small>`, tgt: "전부 탐지", ok: g.S.length > 0 && g.sHit === g.S.length },
       { lbl: "정답지 기간 패턴", val: `${g.tHit}<small> / ${g.T.length}종</small>`, tgt: "전부 탐지", ok: g.T.length > 0 && g.tHit === g.T.length },
-      { lbl: "정상거래 '상' 오분류", val: `${g.fpHigh}<small> / ${g.fpN}건</small>`, tgt: "0건", ok: g.fpN > 0 && g.fpHigh === 0 });
+      { lbl: "정상거래 '상' 오분류", val: `${fmt(g.fpHigh)}<small> / ${fmt(g.fpN)}건</small>`, tgt: "0건", ok: g.fpN > 0 && g.fpHigh === 0 });
     else crit.push(
-      { lbl: "분석 대상", val: `${fmt(R.rows.length)}<small> 건</small>`, tgt: `취소 ${R.prep.stats.cancels}건 상계${R.prep.stats.unmatched ? `, 미매칭 ${R.prep.stats.unmatched}건` : ""}`, ok: undefined },
-      { lbl: "기간 패턴", val: `${Object.values(R.period).reduce((s, x) => s + x.length, 0)}<small> 건</small>`, tgt: "T-R1~T-R4 누적 분석", ok: undefined },
-      { lbl: "추가 점검항목 추천", val: `${R.recs.length}<small> 건</small>`, tgt: "최근 3개월 집계 기반", ok: undefined });
+      { lbl: "분석 대상", val: `${fmt(R.rows.length)}<small> 건</small>`, tgt: `취소 ${fmt(R.prep.stats.cancels)}건 상계${R.prep.stats.unmatched ? `, 미매칭 ${fmt(R.prep.stats.unmatched)}건` : ""}`, ok: undefined },
+      { lbl: "기간 패턴", val: `${fmt(Object.values(R.period).reduce((s, x) => s + x.length, 0))}<small> 건</small>`, tgt: "T-R1~T-R4 누적 분석", ok: undefined },
+      { lbl: "추가 점검항목 추천", val: `${fmt(R.recs.length)}<small> 건</small>`, tgt: "최근 3개월 집계 기반", ok: undefined });
     const badge = (ok) => ok === undefined ? "" : `<span class="verdict ${ok ? "ok" : "ng"}">${ok ? "정상" : "확인 필요"}</span>`;
     $("#score").innerHTML = crit.map((c) => `<div class="crit"><div class="lbl">${c.lbl}${badge(c.ok)}</div><div class="val">${c.val}</div><div class="tgt">${c.tgt}</div></div>`).join("");
     $("#overall").innerHTML = (S.readCount !== S.sheetRows ? `<span class="ng-txt">승인번호가 빈 행 ${fmt(S.sheetRows - S.readCount)}개는 읽지 않았습니다. 원본 파일의 합계행·빈 행인지 확인하세요.</span> ` : "") +
@@ -90,10 +107,10 @@
   function renderTabs() {
     document.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === S.tab)));
     document.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== S.tab));
-    $("#cntList").textContent = R.list.length;
+    $("#cntList").textContent = fmt(R.list.length);
     $("#cntAns").textContent = R.graded ? `${R.graded.sHit + R.graded.tHit}/${R.graded.S.length + R.graded.T.length}` : "";
-    $("#cntPer").textContent = Object.values(R.period).reduce((s, a) => s + a.length, 0);
-    $("#cntRec").textContent = R.recs.length;
+    $("#cntPer").textContent = fmt(Object.values(R.period).reduce((s, a) => s + a.length, 0));
+    $("#cntRec").textContent = fmt(R.recs.length);
     $("#ansTab").hidden = !R.graded;
     if (!R.graded && S.tab === "answer") { S.tab = "list"; renderTabs(); }
   }
@@ -143,14 +160,14 @@
       R15: `회계일자 − 승인일이 ${P.settleDays}일 초과`,
       R16: `공용카드이고 직원명이 비었으며 금액이 ${w(P.sharedMin)}원 이상`,
       R17: "휴가내역 시트의 휴가 기간 중 본인 카드 사용",
-      "T-R1": `같은 직원·가맹점이 최근 3개월 ${P.t1Count}회 이상`,
+      "T-R1": `같은 직원·가맹점이 최근 3개월 ${fmt(P.t1Count)}회 이상`,
       "T-R2": `직원 월 사용액이 직전 6개월 평균의 ${P.t2Ratio}배 초과 (월 ${w(P.t2Floor)}원 이상)`,
       "T-R3": `분기말 월에 부서의 월말 5영업일 사용액이 ${Math.round(P.t3Share * 100)}% 초과, 월 사용액이 부서 평균의 ${P.t3Mult}배 이상`,
       "T-R4": `같은 직원·가맹점·금액이 ${P.t4Months}개월 이상 연속`,
     };
     if (D[id]) return D[id];
     const c = R.custom.rules.find((x) => x.id === id);
-    return c ? c.conds.map((x) => `${x.col} ${x.op}${x.val !== "" ? " " + x.val : ""}`).join(" 그리고 ") : "";
+    return c ? c.conds.map((x) => `${x.col} ${x.op}${x.val !== "" ? " " + condVal(x) : ""}`).join(" 그리고 ") : "";
   }
   function renderRuleDrawer() {
     if (!R) return;
@@ -159,7 +176,7 @@
     const row = (id, name, weight, kind) => `<li class="rule${S.ruleFocus === id ? " focus" : ""}" id="rule-${esc(id)}">
       <div class="rh"><b class="mono">${esc(id)}</b> <span>${esc(name)}</span>${weight !== null ? `<span class="w">가중치 ${weight}</span>` : ""}</div>
       <div class="rd">${esc(ruleDesc(id))}</div>
-      <button type="button" class="rf" data-filter="${esc(id)}" ${cnt[id] ? "" : "disabled"}>${S.month} 선별 중 ${cnt[id] || 0}건${cnt[id] ? (S.ruleFilter === id ? " · 보는 중" : " · 이 규칙 건만 보기") : ""}</button></li>`;
+      <button type="button" class="rf" data-filter="${esc(id)}" ${cnt[id] ? "" : "disabled"}>${S.month} 선별 중 ${fmt(cnt[id] || 0)}건${cnt[id] ? (S.ruleFilter === id ? " · 보는 중" : " · 이 규칙 건만 보기") : ""}</button></li>`;
     const sec = (title, items) => items.length ? `<h3>${title}</h3><ul>${items.join("")}</ul>` : "";
     $("#ruleBody").innerHTML =
       `<p class="muted">위험점수 = 걸린 규칙 가중치 합 · 6점 이상 <span class="g g-상">상</span> 3~5점 <span class="g g-중">중</span> 1~2점 <span class="g g-하">하</span> · 금지 업종은 무조건 상 · 휴일·심야만 걸리고 적요에 사전승인 문서번호가 있으면 규칙당 1점 감점</p>` +
@@ -191,7 +208,7 @@
   function renderList() {
     const counts = { 전체: R.list.length, 상: 0, 중: 0, 하: 0 };
     R.list.forEach((r) => counts[r.grade]++);
-    $("#gradeFilter").innerHTML = `<span class="flabel">등급</span>` + Object.entries(counts).map(([k, v]) => `<button type="button" data-g="${k}" aria-pressed="${S.grade === k}">${k} <span class="mono">${v}</span></button>`).join("");
+    $("#gradeFilter").innerHTML = `<span class="flabel">등급</span>` + Object.entries(counts).map(([k, v]) => `<button type="button" data-g="${k}" aria-pressed="${S.grade === k}">${k} <span class="mono">${fmt(v)}</span></button>`).join("");
     const reviewOf = (r) => S.reviews[r.no]?.result || "미검토";
     const rcount = { 전체: R.list.length, 미검토: 0, 적정: 0, 소명요청: 0, 부적정: 0 };
     R.list.forEach((r) => rcount[reviewOf(r)]++);
@@ -203,7 +220,7 @@
     // 선택한 건이 지금 목록(등급·검토결과·규칙 필터)에 없으면 상세를 닫음
     if (S.sel && !rows.some((r) => r.no === S.sel)) S.sel = null;
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
-    $("#reviewProgress").textContent = `검토 입력 ${done}/${R.list.length}건`;
+    $("#reviewProgress").textContent = `검토 입력 ${fmt(done)}/${fmt(R.list.length)}건`;
     // 상세 영역을 표 밖으로 되돌린 뒤 표를 다시 그리고, 선택한 행 바로 아래로 옮김
     const det = $("#detail"); if (det.closest("#listTbl")) $("#listTbl").closest(".tbl-wrap").after(det);
     $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점 · 적요</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
@@ -260,14 +277,14 @@
   function renderAnswers() {
     const g = R.graded;
     if (!g) { $("#ansSummary").textContent = "업로드한 파일에 정답지 시트가 없어 채점할 수 없습니다."; $("#ansTbl").innerHTML = ""; return; }
-    $("#ansSummary").innerHTML = `단건 <b>${g.sHit}/${g.S.length}</b> · 기간 패턴 <b>${g.tHit}/${g.T.length}</b> · 정상거래(FP) ${g.fpN}건 중 '상' <b>${g.fpHigh}건</b>. 정답지는 채점에만 쓰고 선별 로직에는 넣지 않습니다.`;
+    $("#ansSummary").innerHTML = `단건 <b>${g.sHit}/${g.S.length}</b> · 기간 패턴 <b>${g.tHit}/${g.T.length}</b> · 정상거래(FP) ${fmt(g.fpN)}건 중 '상' <b>${fmt(g.fpHigh)}건</b>. 정답지는 채점에만 쓰고 선별 로직에는 넣지 않습니다.`;
     const fpGroup = g.list.filter((o) => o.type === "FP");
     const body = g.list.filter((o) => o.type !== "FP").map((o) => `<tr>
       <td class="mono">${o.id}</td><td>${esc(o.title)}</td><td class="mono">${esc(o.expect)}</td>
-      <td>${o.items.map((i) => i.row ? `<div class="chips" style="margin-bottom:2px">${o.type === "S" ? `<span class="g g-${i.row.grade}" style="width:20px;height:18px;font-size:11px">${i.row.grade || "–"}</span>` : ""}${o.type === "S" ? ruleChips({ hits: i.row.hits, tHits: new Set() }) : [...i.row.tHits].map((h) => `<span class="chip t">${h}</span>`).join("")}</div>` : `<div class="ng-txt">승인번호 ${i.no} 없음</div>`).slice(0, o.type === "T" ? 1 : 9).join("")}${o.type === "T" ? `<div class="muted">${o.items.length}건 묶음</div>` : ""}</td>
+      <td>${o.items.map((i) => i.row ? `<div class="chips" style="margin-bottom:2px">${o.type === "S" ? `<span class="g g-${i.row.grade}" style="width:20px;height:18px;font-size:11px">${i.row.grade || "–"}</span>` : ""}${o.type === "S" ? ruleChips({ hits: i.row.hits, tHits: new Set() }) : [...i.row.tHits].map((h) => `<span class="chip t">${h}</span>`).join("")}</div>` : `<div class="ng-txt">승인번호 ${i.no} 없음</div>`).slice(0, o.type === "T" ? 1 : 9).join("")}${o.type === "T" ? `<div class="muted">${fmt(o.items.length)}건 묶음</div>` : ""}</td>
       <td>${o.detected ? `<span class="ok-txt">탐지</span>` : `<span class="ng-txt">미탐</span>`}<div class="muted">${esc(o.note)}</div></td></tr>`).join("");
     const fpRow = fpGroup.length ? `<tr><td class="mono">FP01–${fpGroup[fpGroup.length - 1].id.slice(2)}</td><td>${esc(fpGroup[0].title)}</td><td class="mono">${esc(fpGroup[0].expect)}</td>
-      <td>${Object.entries(g.fpGrades).map(([k, v]) => `${k} ${v}건`).join(" · ")}</td><td>${g.fpHigh === 0 ? `<span class="ok-txt">상 0건</span>` : `<span class="ng-txt">상 ${g.fpHigh}건</span>`}<div class="muted">사전승인 문서번호로 저위험 조정</div></td></tr>` : "";
+      <td>${Object.entries(g.fpGrades).map(([k, v]) => `${k} ${fmt(v)}건`).join(" · ")}</td><td>${g.fpHigh === 0 ? `<span class="ok-txt">상 0건</span>` : `<span class="ng-txt">상 ${g.fpHigh}건</span>`}<div class="muted">사전승인 문서번호로 저위험 조정</div></td></tr>` : "";
     $("#ansTbl").innerHTML = `<thead><tr><th>ID</th><th>시나리오</th><th>기대 규칙</th><th>앱 결과(등급·걸린 규칙)</th><th>판정</th></tr></thead><tbody>${body}${fpRow}</tbody>`;
   }
 
@@ -280,10 +297,10 @@
     const bw = (W - pl - pr) / sm.length;
     const y = (v) => pt + (H - pt - pb) * (1 - v / top);
     let svg = "";
-    for (let v = 0; v <= top; v += step) svg += `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule-2)"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${(v / 1e6).toFixed(0)}백만</text>`;
+    for (let v = 0; v <= top; v += step) svg += `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule-2)"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v / 1e6)}백만</text>`;
     sm.forEach((m, i) => {
       const x = pl + i * bw + bw * 0.18, w = bw * 0.64;
-      svg += `<rect x="${x}" y="${y(m.amount)}" width="${w}" height="${y(0) - y(m.amount)}" rx="2" fill="${m.month === S.month ? "var(--accent)" : "var(--rule)"}"><title>${m.month}: ${won(m.amount)} (${m.n}건)</title></rect>`;
+      svg += `<rect x="${x}" y="${y(m.amount)}" width="${w}" height="${y(0) - y(m.amount)}" rx="2" fill="${m.month === S.month ? "var(--accent)" : "var(--rule)"}"><title>${m.month}: ${won(m.amount)} (${fmt(m.n)}건)</title></rect>`;
       svg += `<text x="${pl + i * bw + bw / 2}" y="${H - 10}" text-anchor="middle">${m.month.slice(2).replace("-", ".")}</text>`;
     });
     const pts = sm.map((m, i) => `${pl + i * bw + bw / 2},${y(m.ma3)}`).join(" ");
@@ -294,23 +311,23 @@
 
     $("#monthTbl").innerHTML = `<thead><tr><th>월</th><th style="text-align:right">건수</th><th style="text-align:right">금액</th><th style="text-align:right">건당평균</th><th style="text-align:right">전월 대비</th><th style="text-align:right">선별</th></tr></thead><tbody>` +
       sm.map((m, i) => { const p = sm[i - 1]; const d = p ? ((m.amount - p.amount) / p.amount) * 100 : null;
-        return `<tr${m.month === S.month ? ' class="on"' : ""}><td class="mono">${m.month}</td><td class="n">${m.n}</td><td class="n">${fmt(m.amount)}</td><td class="n">${fmt(m.avg)}</td><td class="n">${d === null ? "–" : (d > 0 ? "+" : "") + d.toFixed(1) + "%"}</td><td class="n">${m.flagged}</td></tr>`; }).join("") + "</tbody>";
+        return `<tr${m.month === S.month ? ' class="on"' : ""}><td class="mono">${m.month}</td><td class="n">${fmt(m.n)}</td><td class="n">${fmt(m.amount)}</td><td class="n">${fmt(m.avg)}</td><td class="n">${d === null ? "–" : (d > 0 ? "+" : "") + d.toFixed(1) + "%"}</td><td class="n">${fmt(m.flagged)}</td></tr>`; }).join("") + "</tbody>";
 
     const P = S.params;
     const defs = {
-      "T-R1": `직원×가맹점 최근 3개월(${ENGINE.addMonths(S.month, -2)}~${S.month}) ${P.t1Count}회 이상`,
+      "T-R1": `직원×가맹점 최근 3개월(${ENGINE.addMonths(S.month, -2)}~${S.month}) ${fmt(P.t1Count)}회 이상`,
       "T-R2": `직원 월 사용액 ÷ 직전 6개월 평균 > ${P.t2Ratio} (월 ${fmt(P.t2Floor)}원 이상, 최근 3개월)`,
       "T-R3": `분기말 월 부서 월말 5영업일 비중 > ${P.t3Share * 100}% 그리고 월 사용액 ≥ 부서 월평균 × ${P.t3Mult}`,
       "T-R4": `동일 직원·가맹점·금액 ${P.t4Months}개월 이상 연속`,
     };
     const item = {
-      "T-R1": (x) => `<tr><td>${esc(x.who)}<div class="muted">${esc(x.dept)}</div></td><td>${esc(x.merchant)}</td><td class="n">${x.n}회</td><td class="n">${fmt(x.amount)}</td><td>${esc(x.focus) || "–"}</td></tr>`,
+      "T-R1": (x) => `<tr><td>${esc(x.who)}<div class="muted">${esc(x.dept)}</div></td><td>${esc(x.merchant)}</td><td class="n">${fmt(x.n)}회</td><td class="n">${fmt(x.amount)}</td><td>${esc(x.focus) || "–"}</td></tr>`,
       "T-R2": (x) => `<tr><td>${esc(x.who)}<div class="muted">${esc(x.dept)}</div></td><td class="mono">${x.month}</td><td class="n">${fmt(x.cur)}</td><td class="n">${fmt(x.avg)}</td><td class="n"><b>×${x.ratio.toFixed(1)}</b></td><td>${spark(x.series)}</td></tr>`,
       "T-R3": (x) => `<tr><td>${esc(x.who)}</td><td class="mono">${x.month}</td><td class="n">${(x.share * 100).toFixed(0)}%</td><td class="n">${fmt(x.total)}</td><td class="n">×${(x.total / x.avg).toFixed(1)}</td></tr>`,
       "T-R4": (x) => `<tr><td>${esc(x.who)}<div class="muted">${esc(x.dept)}</div></td><td>${esc(x.merchant)}</td><td class="n">${fmt(x.amount)}</td><td class="n">${x.months}개월</td></tr>`,
     };
     const heads = { "T-R1": ["직원", "가맹점", "3개월 건수", "금액", "요일 집중"], "T-R2": ["직원", "기준월", "월 사용액", "직전 6개월 평균", "배율", "12개월 추이"], "T-R3": ["부서", "월", "월말 5영업일 비중", "월 사용액", "부서 평균 대비"], "T-R4": ["직원", "가맹점", "금액", "연속"] };
-    $("#patterns").innerHTML = Object.keys(ENGINE.T_NAMES).map((k) => `<div class="panel pattern"><div class="head"><b>${k}</b><h2 style="margin:0">${ENGINE.T_NAMES[k]}</h2><span class="tag">${R.period[k].length}건</span></div>
+    $("#patterns").innerHTML = Object.keys(ENGINE.T_NAMES).map((k) => `<div class="panel pattern"><div class="head"><b>${k}</b><h2 style="margin:0">${ENGINE.T_NAMES[k]}</h2><span class="tag">${fmt(R.period[k].length)}건</span></div>
       <div class="def">${defs[k]}</div>
       ${R.period[k].length ? `<div class="tbl-wrap"><table><thead><tr>${heads[k].map((h, i) => `<th${i >= 2 && k !== "T-R1" ? ' style="text-align:right"' : ""}>${h}</th>`).join("")}</tr></thead><tbody>${R.period[k].map(item[k]).join("")}</tbody></table></div>` : `<div class="empty">해당 패턴 없음</div>`}</div>`).join("");
   }
@@ -329,7 +346,7 @@
 
   function renderSettings() {
     const labels = { nightStart: "R02 심야 시작(시, 이상)", nightEnd: "R02 심야 종료(시, 미만)", splitGap: "R04 분할결제 간격(분)", memoMin: "R06 적요 최소 글자수", settleDays: "R15 정산 기한(일)", round: "R12 라운드 단위(원)", sharedMin: "R16 공용카드 기준금액(원)", distGap: "R14 원거리 간격(분)", t1Count: "T-R1 3개월 반복 횟수", t2Ratio: "T-R2 급증 배율", t2Floor: "T-R2 최소 월 사용액(원)", t3Share: "T-R3 월말 비중(0~1)", t3Mult: "T-R3 부서 평균 배수", t4Months: "T-R4 연속 개월" };
-    $("#params").innerHTML = Object.keys(labels).map((k) => `<label for="p_${k}">${labels[k]}<input id="p_${k}" data-p="${k}" type="number" step="any" value="${S.params[k]}"></label>`).join("");
+    $("#params").innerHTML = Object.keys(labels).map((k) => `<label for="p_${k}">${labels[k]}<input id="p_${k}" data-p="${k}" data-money type="text" inputmode="decimal" value="${fmt2(S.params[k])}"></label>`).join("");
     $("#weights").innerHTML = ENGINE.RULE_IDS.concat(R.custom.rules.map((c) => c.id)).map((k) => `<label for="w_${k}">${k} ${esc(ENGINE.ruleName(k))}<input id="w_${k}" data-w="${k}" type="number" min="0" max="10" value="${S.weights[k]}"></label>`).join("");
   }
 
@@ -339,7 +356,7 @@
     const monthN = (id) => R.list.filter((r) => r.hits.has(id)).length;
     $("#customList").innerHTML = (errors.length ? `<div class="notice" style="border-left-color:var(--high)">${errors.map(esc).join("<br>")}</div>` : "") +
       (rules.length ? `<div class="tbl-wrap"><table><thead><tr><th>ID</th><th>조건명</th><th>조건 (모두 만족)</th><th style="text-align:right">가중치</th><th style="text-align:right">전체 적중</th><th style="text-align:right">${S.month} 선별</th></tr></thead><tbody>` +
-        rules.map((c) => `<tr><td class="mono">${c.id}</td><td>${esc(c.name)}</td><td>${c.conds.map((x) => `<span class="chip">${esc(x.col)} ${esc(x.op)}${x.val !== "" ? " " + esc(x.val) : ""}</span>`).join(" ")}</td><td class="n">${S.weights[c.id]}</td><td class="n">${hitN(c.id)}</td><td class="n">${monthN(c.id)}</td></tr>`).join("") + "</tbody></table></div>"
+        rules.map((c) => `<tr><td class="mono">${c.id}</td><td>${esc(c.name)}</td><td>${c.conds.map((x) => `<span class="chip">${esc(x.col)} ${esc(x.op)}${x.val !== "" ? " " + esc(condVal(x)) : ""}</span>`).join(" ")}</td><td class="n">${S.weights[c.id]}</td><td class="n">${fmt(hitN(c.id))}</td><td class="n">${fmt(monthN(c.id))}</td></tr>`).join("") + "</tbody></table></div>"
         : `<p class="empty">기준표에 '추가조건' 시트가 없거나 비어 있습니다. 기준표 양식을 내려받으면 예시가 들어 있습니다.</p>`);
   }
 
@@ -359,8 +376,8 @@
       if (B.gl && r.glName !== B.gl) return false;
       if (B.ind && r.industry !== B.ind) return false;
       if (B.dept && r.dept !== B.dept) return false;
-      if (B.min !== "" && r.amount < Number(B.min)) return false;
-      if (B.max !== "" && r.amount > Number(B.max)) return false;
+      if (B.min !== "" && r.amount < unComma(B.min)) return false;
+      if (B.max !== "" && r.amount > unComma(B.max)) return false;
       if (B.hol && !r.holiday) return false;
       const flagged = !r.excluded && r.score > 0;
       if (B.sel === "y" && !flagged) return false;
@@ -393,15 +410,16 @@
       return o;
     });
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "조건에 맞는 거래가 없습니다" }]), "거래조회");
+    XLSX.utils.book_append_sheet(wb, commaSheet(XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "조건에 맞는 거래가 없습니다" }])), "거래조회");
     const cond = [["조회 조건"], ["기간", B.period === "month" ? S.month : "전체 기간"], ["검색어", B.q], ["계정", B.gl || "전체"], ["업종", B.ind || "전체"], ["부서", B.dept || "전체"],
-      ["금액", `${B.min || "-"} ~ ${B.max || "-"}`], ["선별", { "": "전체", y: "선별된 건만", n: "선별 안 된 건만" }[B.sel]], ["휴일만", B.hol ? "예" : "아니오"], ["취소·상계 포함", B.cancel ? "예" : "아니오"], ["건수", rows.length]];
+      ["금액", `${B.min ? fmt(unComma(B.min)) : "-"} ~ ${B.max ? fmt(unComma(B.max)) : "-"}`], ["선별", { "": "전체", y: "선별된 건만", n: "선별 안 된 건만" }[B.sel]], ["휴일만", B.hol ? "예" : "아니오"], ["취소·상계 포함", B.cancel ? "예" : "아니오"], ["건수", fmt(rows.length)]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cond), "조회조건");
     saveFile(wb, `card-audit_browse_${B.period === "month" ? S.month : "all"}.xlsx`);
     flash("#b_xlsx", "저장했습니다");
   }
   $("#browseFilters").addEventListener("input", (e) => {
     const k = e.target.dataset.b; if (!k) return;
+    if (e.target.dataset.money !== undefined) commaInput(e.target);
     B[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     renderBrowse();
   });
@@ -424,7 +442,7 @@
     if (b) { const rv = (S.reviews[S.sel] ||= {}); rv.result = rv.result === b.dataset.v ? "" : b.dataset.v; store.set("cc_reviews", S.reviews); renderList(); return; }
   });
   $("#detail").addEventListener("input", (e) => { if (e.target.id !== "opinion") return; (S.reviews[S.sel] ||= {}).opinion = e.target.value; store.set("cc_reviews", S.reviews); });
-  $("#params").addEventListener("change", (e) => { const k = e.target.dataset.p; if (!k) return; const v = Number(e.target.value); if (!isFinite(v)) return; S.params[k] = v; run(); });
+  $("#params").addEventListener("change", (e) => { const k = e.target.dataset.p; if (!k) return; const v = unComma(e.target.value); if (!isFinite(v)) return; S.params[k] = v; run(); });
   $("#weights").addEventListener("change", (e) => { const k = e.target.dataset.w; if (!k) return; S.weights[k] = Math.max(0, Number(e.target.value) || 0); run(); });
   $("#resetParams").addEventListener("click", () => { S.params = { ...ENGINE.DEFAULT_PARAMS }; S.weights = null; run(); });
   $("#uploadBtn").addEventListener("click", () => $("#file").click());
@@ -444,7 +462,7 @@
       ["- 비교: " + ENGINE.OPS.join(", ")], ["- 목록중하나는 값에 쉼표로 여러 개를 적습니다(예: 토,일). 승인시는 0~23 숫자, 휴일은 Y/N입니다."],
       ["- 예시 2개는 실제 기준이 아니니 지우거나 바꿔 쓰세요."]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guide), "안내");
-    for (const [k, name] of Object.entries(REF_SHEETS)) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(DEFAULT_REF[k]), name);
+    for (const [k, name] of Object.entries(REF_SHEETS)) XLSX.utils.book_append_sheet(wb, commaSheet(XLSX.utils.json_to_sheet(DEFAULT_REF[k])), name);
     saveFile(wb, "card-audit_reference-template.xlsx");
   });
   $("#file").addEventListener("change", (e) => { if (e.target.files.length) loadFiles([...e.target.files]); e.target.value = ""; });
@@ -455,7 +473,7 @@
   });
   $("#xlsxBtn").addEventListener("click", () => {
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportRows()), "점검대상목록");
+    XLSX.utils.book_append_sheet(wb, commaSheet(XLSX.utils.json_to_sheet(exportRows())), "점검대상목록");
     const per = [];
     for (const [k, list] of Object.entries(R.period)) for (const x of list) per.push({ 패턴: `${k} ${ENGINE.T_NAMES[k]}`, 대상: x.who, 부서: x.dept || "", 가맹점: x.merchant || "", 기준월: x.month || "", 지표: k === "T-R1" ? `3개월 ${x.n}회, ${fmt(x.amount)}원 ${x.focus || ""}` : k === "T-R2" ? `${fmt(x.cur)}원 / 직전 6개월 평균 ${fmt(x.avg)}원 (×${x.ratio.toFixed(1)})` : k === "T-R3" ? `월말 5영업일 ${(x.share * 100).toFixed(0)}%, 부서 평균의 ${(x.total / x.avg).toFixed(1)}배` : `${fmt(x.amount)}원 ${x.months}개월 연속`, 관련건수: x.rows.length });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per.length ? per : [{ 패턴: "해당 없음" }]), "기간패턴");

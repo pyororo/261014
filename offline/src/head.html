@@ -338,8 +338,8 @@ button.chip:hover { background: var(--accent-soft); }
         <label for="b_gl">계정<select id="b_gl" data-b="gl"></select></label>
         <label for="b_ind">가맹점업종<select id="b_ind" data-b="ind"></select></label>
         <label for="b_dept">예산부서<select id="b_dept" data-b="dept"></select></label>
-        <label for="b_min">금액 이상(원)<input id="b_min" data-b="min" type="number" step="1"></label>
-        <label for="b_max">금액 이하(원)<input id="b_max" data-b="max" type="number" step="1"></label>
+        <label for="b_min">금액 이상(원)<input id="b_min" data-b="min" data-money type="text" inputmode="numeric" placeholder="예: 100,000"></label>
+        <label for="b_max">금액 이하(원)<input id="b_max" data-b="max" data-money type="text" inputmode="numeric" placeholder="예: 500,000"></label>
         <label for="b_sel">선별 여부<select id="b_sel" data-b="sel"><option value="">전체</option><option value="y">선별된 건만</option><option value="n">선별 안 된 건만</option></select></label>
         <label class="check" for="b_hol"><input id="b_hol" data-b="hol" type="checkbox"> 휴일 사용만</label>
         <label class="check" for="b_cancel"><input id="b_cancel" data-b="cancel" type="checkbox"> 취소·상계 건 포함</label>
