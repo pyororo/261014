@@ -1,0 +1,7 @@
+# 원본 데이터(엑셀·zip)는 저장소에 올리지 않음 — 로컬 data/ 폴더에만 둠
+data/*
+!data/.gitkeep
+*.xlsx
+*.zip
+__pycache__/
+.venv/
