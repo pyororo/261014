@@ -52,6 +52,7 @@
     const srcTxt = `<span class="tag">업로드</span> ${S.files.map(esc).join(", ")} · 승인번호 기준 중복 제거 후 ${fmt(S.raw.size)}건 · 기준표: ${refTxt}`;
     $("#srcLine").innerHTML = srcTxt + ` · 분석 대상 ${fmt(R.rows.length)}건 (취소 ${R.prep.stats.cancels}건 상계 제외 ${R.prep.stats.matched * 2}건${R.prep.stats.unmatched ? `, 미매칭 ${R.prep.stats.unmatched}건` : ""})`;
     renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderSettings(); renderBrowseFilters(); renderBrowse();
+    if (!$("#ruleDrawer").hidden) renderRuleDrawer();
   }
 
   function renderScore() {
@@ -97,13 +98,82 @@
     if (!R.graded && S.tab === "answer") { S.tab = "list"; renderTabs(); }
   }
 
-  const ruleChips = (r) => [...r.hits].sort().map((h) => `<span class="chip${h.startsWith("U") ? " u" : ""}" title="${ENGINE.ruleName(h)}">${h}</span>`).join("") + [...(r.tHits || [])].map((h) => `<span class="chip t" title="${ENGINE.T_NAMES[h]}">${h}</span>`).join("");
+  const short = (s) => (s.length > 11 ? s.slice(0, 10) + "…" : s);
+  const chip = (id, cls) => { const name = ENGINE.ruleName(id) === id ? ENGINE.T_NAMES[id] || id : ENGINE.ruleName(id);
+    return `<button type="button" class="chip${cls}" data-rule="${esc(id)}" title="${esc(id)} ${esc(name)} · 눌러서 규칙 설명 보기">${esc(id)} <span class="cn">${esc(short(name))}</span></button>`; };
+  const ruleChips = (r) => [...r.hits].sort().map((h) => chip(h, h.startsWith("U") ? " u" : "")).join("") + [...(r.tHits || [])].map((h) => chip(h, " t")).join("");
+
+  // ── 점검 규칙표 (오른쪽 패널) ──
+  function ruleDesc(id) {
+    const P = S.params, w = (x) => fmt(x);
+    const D = {
+      R01: "승인일이 토·일 또는 공휴일 시트에 있는 날",
+      R02: `승인 시각이 ${P.nightStart}시 이후 또는 ${P.nightEnd}시 이전`,
+      R03: "가맹점 업종의 제한구분이 금지 또는 사전승인 (금지 업종은 점수와 관계없이 '상')",
+      R04: `같은 카드·가맹점·날짜에 ${P.splitGap}분 간격 이내로 2건 이상, 합계가 계정 건당 한도 초과`,
+      R05: "전표금액이 계정코드 시트의 건당 한도 초과",
+      R06: `적요가 비었거나 ${P.memoMin}자 미만, 또는 접대비인데 상대방(ㅇㅇㅇ·직함·n인) 표기 없음`,
+      R07: "가맹점 업종이 계정코드 시트의 허용 가맹점업종에 없음",
+      R09: "같은 카드·가맹점·금액·날짜가 2건 이상 (취소로 상계된 건 제외)",
+      R11: "국내해외코드명이 해외",
+      R12: `금액이 ${w(P.round)}원 단위로 떨어지고 ${w(P.round)}원 이상`,
+      R13: "결재문서제목의 비용 항목(하이패스·항공·숙박 등)과 업종이 다르거나, 근무지 안 식사·회식을 여비교통비로 처리",
+      R14: `같은 카드의 연속 2건이 시·도가 다르고 ${P.distGap}분 이내 (온라인·교통 업종 제외)`,
+      R15: `회계일자 − 승인일이 ${P.settleDays}일 초과`,
+      R16: `공용카드이고 직원명이 비었으며 금액이 ${w(P.sharedMin)}원 이상`,
+      R17: "휴가내역 시트의 휴가 기간 중 본인 카드 사용",
+      "T-R1": `같은 직원·가맹점이 최근 3개월 ${P.t1Count}회 이상`,
+      "T-R2": `직원 월 사용액이 직전 6개월 평균의 ${P.t2Ratio}배 초과 (월 ${w(P.t2Floor)}원 이상)`,
+      "T-R3": `분기말 월에 부서의 월말 5영업일 사용액이 ${Math.round(P.t3Share * 100)}% 초과, 월 사용액이 부서 평균의 ${P.t3Mult}배 이상`,
+      "T-R4": `같은 직원·가맹점·금액이 ${P.t4Months}개월 이상 연속`,
+    };
+    if (D[id]) return D[id];
+    const c = R.custom.rules.find((x) => x.id === id);
+    return c ? c.conds.map((x) => `${x.col} ${x.op}${x.val !== "" ? " " + x.val : ""}`).join(" 그리고 ") : "";
+  }
+  function renderRuleDrawer() {
+    if (!R) return;
+    const cnt = {};
+    R.list.forEach((r) => { r.hits.forEach((h) => (cnt[h] = (cnt[h] || 0) + 1)); r.tHits.forEach((h) => (cnt[h] = (cnt[h] || 0) + 1)); });
+    const row = (id, name, weight, kind) => `<li class="rule${S.ruleFocus === id ? " focus" : ""}" id="rule-${esc(id)}">
+      <div class="rh"><b class="mono">${esc(id)}</b> <span>${esc(name)}</span>${weight !== null ? `<span class="w">가중치 ${weight}</span>` : ""}</div>
+      <div class="rd">${esc(ruleDesc(id))}</div>
+      <button type="button" class="rf" data-filter="${esc(id)}" ${cnt[id] ? "" : "disabled"}>${S.month} 선별 중 ${cnt[id] || 0}건${cnt[id] ? (S.ruleFilter === id ? " · 보는 중" : " · 이 규칙 건만 보기") : ""}</button></li>`;
+    const sec = (title, items) => items.length ? `<h3>${title}</h3><ul>${items.join("")}</ul>` : "";
+    $("#ruleBody").innerHTML =
+      `<p class="muted">위험점수 = 걸린 규칙 가중치 합 · 6점 이상 <span class="g g-상">상</span> 3~5점 <span class="g g-중">중</span> 1~2점 <span class="g g-하">하</span> · 금지 업종은 무조건 상 · 휴일·심야만 걸리고 적요에 사전승인 문서번호가 있으면 규칙당 1점 감점</p>` +
+      sec("단건·다건 규칙", ENGINE.RULE_IDS.map((id) => row(id, ENGINE.RULE_NAMES[id], S.weights[id] ?? 0))) +
+      sec(`추가조건 <small>기준표 '추가조건' 시트</small>`, R.custom.rules.map((c) => row(c.id, c.name, S.weights[c.id] ?? c.weight))) +
+      sec("기간 규칙 <small>점수 없이 표시만</small>", Object.keys(ENGINE.T_NAMES).map((id) => row(id, ENGINE.T_NAMES[id], null)));
+    if (S.ruleFocus) document.getElementById("rule-" + S.ruleFocus)?.scrollIntoView({ block: "nearest" });
+  }
+  function openRules(id) {
+    S.ruleFocus = id || null;
+    $("#ruleDrawer").hidden = false; document.body.classList.add("drawer-open");
+    $("#rulesBtn").setAttribute("aria-expanded", "true");
+    renderRuleDrawer();
+  }
+  function closeRules() { $("#ruleDrawer").hidden = true; document.body.classList.remove("drawer-open"); $("#rulesBtn").setAttribute("aria-expanded", "false"); S.ruleFocus = null; }
+  document.addEventListener("click", (e) => {
+    const c = e.target.closest(".chip[data-rule]");
+    if (c) { e.stopPropagation(); openRules(c.dataset.rule); return; }
+  }, true);
+  $("#rulesBtn").addEventListener("click", () => ($("#ruleDrawer").hidden ? openRules() : closeRules()));
+  $("#ruleClose").addEventListener("click", closeRules);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#ruleDrawer").hidden) closeRules(); });
+  $("#ruleBody").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-filter]"); if (!b) return;
+    S.ruleFilter = S.ruleFilter === b.dataset.filter ? null : b.dataset.filter; S.grade = "전체"; S.tab = "list";
+    renderTabs(); renderList(); renderRuleDrawer();
+  });
 
   function renderList() {
     const counts = { 전체: R.list.length, 상: 0, 중: 0, 하: 0 };
     R.list.forEach((r) => counts[r.grade]++);
     $("#gradeFilter").innerHTML = Object.entries(counts).map(([k, v]) => `<button type="button" data-g="${k}" aria-pressed="${S.grade === k}">${k} <span class="mono">${v}</span></button>`).join("");
-    const rows = R.list.filter((r) => S.grade === "전체" || r.grade === S.grade);
+    if (S.ruleFilter && !R.list.some((r) => r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter))) S.ruleFilter = null;
+    if (S.ruleFilter) $("#gradeFilter").insertAdjacentHTML("beforeend", `<button type="button" class="rulef" data-clear-rule="1" aria-pressed="true">${esc(S.ruleFilter)} ${esc(ENGINE.ruleName(S.ruleFilter) === S.ruleFilter ? ENGINE.T_NAMES[S.ruleFilter] || "" : ENGINE.ruleName(S.ruleFilter))} 만 보는 중 ✕</button>`);
+    const rows = R.list.filter((r) => (S.grade === "전체" || r.grade === S.grade) && (!S.ruleFilter || r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter)));
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
     $("#reviewProgress").textContent = `검토 입력 ${done}/${R.list.length}건`;
     $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
@@ -310,7 +380,7 @@
   // ── 이벤트 ──
   $("#tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (!b) return; S.tab = b.dataset.tab; store.set("cc_tab", S.tab); renderTabs(); });
   $("#month").addEventListener("change", (e) => { S.month = e.target.value; S.sel = null; run(); });
-  $("#gradeFilter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.grade = b.dataset.g; renderList(); });
+  $("#gradeFilter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.clearRule) { S.ruleFilter = null; renderList(); renderRuleDrawer(); return; } S.grade = b.dataset.g; renderList(); });
   $("#listTbl").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-no]"); if (!tr) return; S.sel = S.sel === tr.dataset.no ? null : tr.dataset.no; renderList(); if (S.sel) $("#detail").scrollIntoView({ block: "nearest", behavior: "smooth" }); });
   $("#listTbl").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.closest("tr[data-no]")?.click(); });
   $("#detail").addEventListener("click", (e) => {
