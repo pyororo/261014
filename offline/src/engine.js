@@ -128,6 +128,32 @@ const ENGINE = (() => {
   const nf = (x) => Math.round(x).toLocaleString("ko-KR");
 
   // ── 기준표 정리 ──
+  // ── 기준표 합치기: 같은 시트가 여러 파일에 있으면 덮어쓰지 않고 키 기준으로 합침(같은 키는 나중 파일 값). 양식의 '(예시)' 행은 무시 ──
+  const keyDate = (v) => { const d = toDate(v); return d ? ymd(d) : String(v ?? "").trim(); };
+  const REF_KEYS = {
+    accounts: (r) => str(r["G/L 계정"]),
+    industries: (r) => str(r["업종코드"]),
+    holidays: (r) => keyDate(r["일자"]),
+    rules: (r) => str(r["규칙ID"]),
+    employees: (r) => str(r["사번"]),
+    vacations: (r) => [str(r["사번"]), keyDate(r["시작일"]), keyDate(r["종료일"])].join("|"),
+  };
+  const isExample = (r) => Object.values(r).some((v) => typeof v === "string" && v.trim().startsWith("(예시)"));
+  function mergeRef(key, prev, rows) {
+    rows = rows.filter((r) => !isExample(r));
+    let merged;
+    if (key === "custom") {
+      // 추가조건은 같은 조건ID의 행 묶음 단위로 교체 (조건ID가 빈 행은 오류 표시를 위해 그대로 둠)
+      const ids = new Set(rows.map((r) => str(r["조건ID"])).filter(Boolean));
+      merged = prev.filter((r) => !ids.has(str(r["조건ID"]))).concat(rows);
+    } else {
+      const k = REF_KEYS[key] || (() => ""), m = new Map(), loose = [];
+      for (const r of prev.concat(rows)) { const id = k(r); if (id) m.set(id, r); else loose.push(r); }
+      merged = [...m.values(), ...loose];
+    }
+    return { rows: merged, added: rows.length };
+  }
+
   function buildRef(raw) {
     const accounts = new Map();
     for (const a of raw.accounts) {
@@ -541,7 +567,7 @@ const ENGINE = (() => {
     });
   }
 
-  return { OPS, RULE_HELP, DERIVED: Object.keys(DERIVED), ruleName, reasonShort, reasonParts, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
+  return { OPS, RULE_HELP, mergeRef, DERIVED: Object.keys(DERIVED), ruleName, reasonShort, reasonParts, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
 })();
 
 

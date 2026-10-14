@@ -55,6 +55,16 @@ const nightN = base("R02", runP({ nightExclude: ["택시"] }));
 checks.push(["규칙 수정 설정", `R01 끔 ${offN}건, R06 ${base("R06", d0)}→${bareN}, R04 ${base("R04", d0)}→${splitN}, R09 ${base("R09", d0)}→${dupN}, R02 택시 제외 ${base("R02", d0)}→${nightN}`,
   offN === 0 && bareN >= base("R06", d0) && splitN >= base("R04", d0) && dupN >= base("R09", d0) && nightN <= base("R02", d0) && d0.length === rows.length && d0.every((r, i) => r.score === rows[i].score)]);
 
+// 기준표 합치기 시험: 가상데이터와 기준표 양식(예시 행 포함)을 어떤 순서로 불러와도 결과가 같은지 (v1.6 S16 미탐 재발 방지)
+const TPL = new Function(require("fs").readFileSync(require("path").join(__dirname, "src/ref.js"), "utf8") + "; return DEFAULT_REF;")();
+const KEYS = { accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준", employees: "직원마스터", vacations: "휴가내역" };
+const dataRef = Object.fromEntries(Object.entries(KEYS).map(([k, n]) => [k, sheet(n)]));
+const loadOrder = (srcs) => { const raw = {}; for (const src of srcs) for (const k of Object.keys(KEYS)) if (src[k]) raw[k] = ENGINE.mergeRef(k, raw[k] || [], src[k]).rows; return raw; };
+const orderRun = (srcs) => { const r = ENGINE.buildRef(loadOrder(srcs)); const rs = ENGINE.applyRules(ENGINE.prepare(tx, r).rows, r, ENGINE.DEFAULT_PARAMS); ENGINE.periodRules(rs, r, ENGINE.DEFAULT_PARAMS, month); return { g: ENGINE.grade(rs, sheet("정답지")), sel: ENGINE.selectMonth(rs, month).length, vac: r.vacations.length }; };
+const oA = orderRun([dataRef, TPL]), oB = orderRun([TPL, dataRef]);
+checks.push(["기준표 불러오는 순서", `가상데이터→양식 단건 ${oA.g.sHit}/${oA.g.S.length}·선별 ${oA.sel}건, 양식→가상데이터 ${oB.g.sHit}/${oB.g.S.length}·선별 ${oB.sel}건, 휴가내역 ${oA.vac}행(예시 행 제외)`,
+  [oA, oB].every((o) => o.g.sHit === g.sHit && o.g.tHit === g.tHit && o.sel === sel.length && o.vac === dataRef.vacations.length)]);
+
 for (const [k, v, ok] of checks) console.log(`${ok ? "통과" : "실패"}  ${k}: ${v}`);
 for (const o of g.list.filter((o) => o.type !== "FP" && !o.detected)) console.log(`  미탐 ${o.id} ${o.title} — ${o.note}`);
 process.exit(checks.every((c) => c[2]) ? 0 : 1);

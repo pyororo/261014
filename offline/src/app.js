@@ -73,7 +73,11 @@
   // ── 렌더 ──
   function render() {
     $("#month").innerHTML = R.months.map((m) => `<option value="${m}" ${m === S.month ? "selected" : ""}>${m.replace("-", "년 ")}월</option>`).join("");
-    const refTxt = Object.entries(REF_LABELS).map(([k, v]) => `${v} ${S.refRaw[k]?.length ? "✓" : "–"}`).join(" · ");
+    const refTxt = Object.entries(REF_LABELS).map(([k, v]) => {
+      const n = S.refRaw[k]?.length || 0, src = S.refFiles[k] || [];
+      const by = src.length > 1 ? ` (${src.map((x) => `${fmt(x.n)}행 ${esc(x.file.replace(/\.[^.]+$/, ""))}`).join(" + ")})` : "";
+      return `${v} ${n ? `${fmt(n)}행${by}` : "–"}`;
+    }).join(" · ");
     const srcTxt = `<span class="tag">업로드</span> ${S.files.map(esc).join(", ")} · 승인번호 기준 중복 제거 후 ${fmt(S.raw.size)}건 · 기준표: ${refTxt}`;
     $("#srcLine").innerHTML = srcTxt + ` · 분석 대상 ${fmt(R.rows.length)}건 (취소 ${fmt(R.prep.stats.cancels)}건 상계 제외 ${fmt(R.prep.stats.matched * 2)}건${R.prep.stats.unmatched ? `, 미매칭 ${fmt(R.prep.stats.unmatched)}건` : ""})`;
     renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderBrowseFilters(); renderBrowse();
@@ -725,7 +729,7 @@
   $("#resetBtn").addEventListener("click", () => {
     if ($("#resetBtn").dataset.confirm !== "1") { $("#resetBtn").dataset.confirm = "1"; $("#resetBtn").textContent = "한 번 더 누르면 초기화"; setTimeout(() => { $("#resetBtn").dataset.confirm = ""; $("#resetBtn").textContent = "불러온 파일 비우기"; }, 3000); return; }
     $("#resetBtn").dataset.confirm = ""; $("#resetBtn").textContent = "불러온 파일 비우기";
-    Object.assign(S, { source: "none", files: [], raw: new Map(), sheetRows: 0, readCount: 0, refRaw: {}, answers: null, month: null, sel: null, weights: null });
+    Object.assign(S, { source: "none", files: [], raw: new Map(), sheetRows: 0, readCount: 0, refRaw: {}, refFiles: {}, answers: null, month: null, sel: null, weights: null });
     closeEditor();
     R = null; renderEmpty();
   });
@@ -777,6 +781,11 @@
 
   // ── 데이터 불러오기 ──
   const SHEETS = { custom: "추가조건", tx: "전체", accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준(가상)", employees: "직원마스터", vacations: "휴가내역", answers: "정답지" };
+  function mergeRef(key, rows, file) {
+    const r = ENGINE.mergeRef(key, S.refRaw[key] || [], rows);
+    S.refRaw[key] = r.rows;
+    (S.refFiles[key] = S.refFiles[key] || []).push({ file, n: r.added });
+  }
   async function loadFiles(files) {
     const t0 = performance.now();
     if (typeof XLSX === "undefined") { $("#srcLine").innerHTML = '<span class="ng-txt">엑셀 읽기 라이브러리를 불러오지 못했습니다. 페이지를 새로 고친 뒤 다시 올려 주세요.</span>'; return; }
@@ -794,7 +803,7 @@
           S.readCount += rows.filter((r) => String(r["승인번호"] ?? "").trim()).length;
         }
         for (const key of ["accounts", "industries", "holidays", "rules", "employees", "vacations", "custom"]) {
-          const n = find(SHEETS[key]); if (n) { S.refRaw[key] = read(n); }
+          const n = find(SHEETS[key]); if (n) mergeRef(key, read(n), f.name);
         }
         const an = find(SHEETS.answers); if (an) S.answers = read(an);
         if (wb.SheetNames.includes("규칙설정")) readConfigSheet(read("규칙설정"));
