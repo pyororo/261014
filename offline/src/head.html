@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 외부 통신 전면 차단: 이 파일은 어떤 서버에도 연결하지 않습니다 (스크립트·스타일은 파일 안에 포함) -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>법인카드 점검 도구</title>
+<style>
+/* 레이아웃: 감사 조서(working paper) 형식 — 상단 완료조건 채점표, 아래 탭으로 선별목록·정답지·기간분석·AI 추천 */
+:root {
+  --paper: #f4f5f2; --sheet: #ffffff; --ink: #1c2320; --ink-2: #4e5a55; --ink-3: #7c8783;
+  --rule: #d9ddd8; --rule-2: #e8ebe7; --accent: #1d5a6e; --accent-soft: #e2edf0;
+  --high: #b3261e; --high-soft: #f8e4e2; --mid: #9a5b00; --mid-soft: #f6ead6; --low: #56636b; --low-soft: #e9edef;
+  --pass: #2f6b3a; --pass-soft: #e1efe3; --fail: #b3261e;
+  --f-display: "Batang", "바탕", "Nanum Myeongjo", serif;
+  --f-body: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --f-mono: "Consolas", "D2Coding", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #141917; --sheet: #1b211f; --ink: #e6ebe8; --ink-2: #b2bcb7; --ink-3: #85908b;
+  --rule: #313a36; --rule-2: #262d2a; --accent: #7fbfd3; --accent-soft: #1f3239;
+  --high: #f08a80; --high-soft: #3a2220; --mid: #e3b064; --mid-soft: #382c18; --low: #a9b6bd; --low-soft: #262e32;
+  --pass: #87c995; --pass-soft: #1d3322; --fail: #f08a80; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --paper: #141917; --sheet: #1b211f; --ink: #e6ebe8; --ink-2: #b2bcb7; --ink-3: #85908b;
+  --rule: #313a36; --rule-2: #262d2a; --accent: #7fbfd3; --accent-soft: #1f3239;
+  --high: #f08a80; --high-soft: #3a2220; --mid: #e3b064; --mid-soft: #382c18; --low: #a9b6bd; --low-soft: #262e32;
+  --pass: #87c995; --pass-soft: #1d3322; --fail: #f08a80; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+body.is-empty .needs-data { display: none !important; }
+body:not(.is-empty) .empty-only { display: none !important; }
+body { background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.55; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 20px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.wrap > *, section { min-width: 0; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+.num, td.n, .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+button, select, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 머리 */
+.top { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: end; justify-content: space-between; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+.top .eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--ink-3); }
+.top h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(24px, 3.4vw, 32px); letter-spacing: -.01em; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--rule); background: var(--sheet); border-radius: 6px; padding: 7px 12px; font-size: 13px; }
+.btn:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--sheet); font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+select.btn { padding-right: 8px; }
+.src { font-size: 12px; color: var(--ink-2); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tag { display: inline-flex; align-items: center; border-radius: 4px; padding: 1px 7px; font-size: 12px; font-weight: 600; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.notice { border: 1px solid var(--rule); border-left: 4px solid var(--mid); background: var(--sheet); padding: 8px 12px; font-size: 13px; color: var(--ink-2); border-radius: 0 6px 6px 0; }
+
+/* 문제 정의 + 완료조건 채점표 */
+.brief { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 18px; }
+.panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 18px; min-width: 0; }
+.panel h2 { font-size: 15px; font-weight: 700; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.panel h2 small { font-weight: 400; color: var(--ink-3); font-size: 12px; }
+.problem p { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; }
+.problem p:last-child { margin: 0; }
+.problem b { color: var(--ink); font-weight: 600; }
+.score { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.crit { background: var(--sheet); padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
+.crit .lbl { font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.crit .val { font-family: var(--f-mono); font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+.crit .val small { font-size: 13px; color: var(--ink-3); }
+.crit .tgt { font-size: 12px; color: var(--ink-3); }
+.verdict { font-size: 11px; font-weight: 700; letter-spacing: .06em; border-radius: 3px; padding: 1px 6px; }
+.verdict.ok { background: var(--pass-soft); color: var(--pass); }
+.verdict.ng { background: var(--high-soft); color: var(--fail); }
+.verdict.na { background: var(--low-soft); color: var(--low); }
+.overall { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+
+/* 탭 */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+.tab { border: 0; background: none; padding: 9px 14px; font-size: 14px; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.tab .cnt { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); margin-left: 4px; }
+
+/* 표 */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; font-size: 12px; color: var(--ink-2); background: var(--rule-2); padding: 7px 10px; white-space: nowrap; position: sticky; top: 0; }
+td { padding: 7px 10px; border-top: 1px solid var(--rule-2); vertical-align: top; }
+td.n { text-align: right; white-space: nowrap; }
+tbody tr.click { cursor: pointer; }
+tbody tr.click:hover td { background: var(--accent-soft); }
+tbody tr.on td { background: var(--accent-soft); }
+.g { display: inline-grid; place-items: center; width: 24px; height: 22px; border-radius: 4px; font-weight: 700; font-size: 12px; }
+.g-상 { background: var(--high-soft); color: var(--high); }
+.g-중 { background: var(--mid-soft); color: var(--mid); }
+.g-하 { background: var(--low-soft); color: var(--low); }
+tr.sev-상 td:first-child { box-shadow: inset 3px 0 0 var(--high); }
+tr.sev-중 td:first-child { box-shadow: inset 3px 0 0 var(--mid); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--rule); border-radius: 3px; padding: 0 5px; white-space: nowrap; color: var(--ink-2); }
+.chip.t { border-color: var(--accent); color: var(--accent); }
+.reason { color: var(--ink-2); min-width: 280px; }
+.muted { color: var(--ink-3); }
+.ok-txt { color: var(--pass); font-weight: 600; }
+.ng-txt { color: var(--fail); font-weight: 600; }
+
+.bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.filters { display: flex; gap: 4px; flex-wrap: wrap; }
+.filters button { border: 1px solid var(--rule); background: var(--sheet); border-radius: 999px; padding: 3px 11px; font-size: 13px; }
+.filters button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+
+/* 건별 상세 */
+.detail { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 14px; }
+.kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 12px; font-size: 13px; margin: 0; }
+.kv dt { color: var(--ink-3); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.ai-box { border: 1px dashed var(--accent); border-radius: 6px; padding: 12px 14px; background: var(--accent-soft); display: grid; gap: 8px; }
+.ai-box h3 { font-size: 13px; color: var(--accent); }
+.ai-box ul { margin: 0; padding-left: 18px; }
+.ai-box p { margin: 0; }
+.review { display: grid; gap: 8px; }
+.review .row { display: flex; gap: 6px; flex-wrap: wrap; }
+.review label { font-size: 12px; color: var(--ink-3); }
+.review textarea { width: 100%; min-height: 64px; border: 1px solid var(--rule); border-radius: 6px; padding: 8px; background: var(--sheet); resize: vertical; }
+.seg button { border: 1px solid var(--rule); background: var(--sheet); padding: 4px 12px; border-radius: 6px; font-size: 13px; }
+.seg button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--sheet); }
+
+/* 기간 분석 */
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--ink-3); font-family: var(--f-mono); font-size: 11px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; height: 8px; margin-right: 5px; border-radius: 2px; vertical-align: middle; }
+.pattern { display: grid; gap: 8px; }
+.pattern .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.pattern .head b { font-family: var(--f-mono); color: var(--accent); }
+.pattern .def { font-size: 12px; color: var(--ink-3); }
+.empty { color: var(--ink-3); font-size: 13px; padding: 6px 0; }
+
+/* AI 추천 */
+.recs { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.rec { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 14px; display: grid; gap: 6px; align-content: start; }
+.rec h3 { font-size: 14px; }
+.rec .basis { font-size: 13px; }
+.rec .why { font-size: 12.5px; color: var(--ink-2); }
+.rec .how { font-size: 12px; color: var(--ink-3); font-family: var(--f-mono); }
+.rec.claude { border-style: dashed; border-color: var(--accent); }
+
+.settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 16px; }
+.settings label { display: grid; gap: 2px; font-size: 12px; color: var(--ink-2); }
+.settings input { border: 1px solid var(--rule); border-radius: 5px; padding: 5px 8px; background: var(--sheet); font-family: var(--f-mono); width: 100%; }
+.foot { font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--rule); padding-top: 10px; }
+
+@media (max-width: 900px) {
+  .brief, .detail, .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .score { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .wrap { padding-inline: 16px; }
+  .score { grid-template-columns: minmax(0, 1fr); }
+  .kv { grid-template-columns: 80px minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: no-preference) { .tab, .btn, .filters button { transition: background .15s, color .15s, border-color .15s; } }
+</style>
+</head>
+<body class="is-empty">
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">감사부 · 법인카드 사용 적정성 점검 · 오프라인 v1.0</div>
+      <h1>법인카드 점검 도구</h1>
+    </div>
+    <div class="controls">
+      <label class="src needs-data" for="month">점검 대상월</label>
+      <select id="month" class="btn needs-data"></select>
+      <input id="file" type="file" accept=".xlsx,.xls,.csv" multiple hidden>
+      <button class="btn primary" id="uploadBtn" type="button">엑셀 불러오기</button>
+      <button class="btn" id="templateBtn" type="button">기준표 양식 내려받기</button>
+      <button class="btn needs-data" id="resetBtn" type="button">불러온 파일 비우기</button>
+    </div>
+  </header>
+  <div class="src" id="srcLine"></div>
+  <div class="notice">선별 결과와 자동 문장은 점검이 필요한 거래를 고르기 위한 <b>참고자료</b>이며, 부적정 여부의 최종 판단은 감사부 담당자가 증빙을 확인한 뒤 내립니다. 이 파일은 네트워크를 쓰지 않으며, 불러온 엑셀은 이 PC의 브라우저 안에서만 처리됩니다.</div>
+
+  <section class="brief">
+    <div class="panel problem">
+      <h2>사용 방법</h2>
+      <p><b>1.</b> <b>기준표 엑셀</b>(계정코드·업종코드·공휴일·점검기준·직원마스터·휴가내역 시트)과 <b>SAP 추출 엑셀</b>을 함께 불러옵니다. 여러 파일을 한 번에 골라도 되고, 나눠서 불러오면 승인번호 기준으로 누적됩니다.</p>
+      <p><b>2.</b> 기준표가 없으면 <b>기준표 양식 내려받기</b>로 받은 파일에 실제 사내 기준을 입력해 씁니다. 양식의 값은 교육용 가상값입니다.</p>
+      <p><b>3.</b> 점검 대상월을 고르고 목록에서 건을 눌러 검토결과·의견을 입력한 뒤 <b>결과 엑셀 저장</b>으로 보관합니다. 저장한 결과 엑셀을 다시 불러오면 검토결과·의견이 복원됩니다.</p>
+    </div>
+    <div class="panel">
+      <h2>처리 점검표 <small id="scoreNote"></small></h2>
+      <div class="empty-only empty">엑셀을 불러오면 읽은 건수, 처리시간, 선별 결과가 여기 표시됩니다.</div>
+      <div class="score needs-data" id="score"></div>
+      <div class="overall" id="overall"></div>
+    </div>
+  </section>
+
+  <nav class="tabs needs-data" role="tablist" id="tabs">
+    <button class="tab" role="tab" data-tab="list" aria-selected="true">점검대상 목록<span class="cnt" id="cntList"></span></button>
+    <button class="tab" role="tab" data-tab="answer" id="ansTab" aria-selected="false" hidden>정답지 대조<span class="cnt" id="cntAns"></span></button>
+    <button class="tab" role="tab" data-tab="period" aria-selected="false">기간 분석<span class="cnt" id="cntPer"></span></button>
+    <button class="tab" role="tab" data-tab="recs" aria-selected="false">추가 점검항목<span class="cnt" id="cntRec"></span></button>
+    <button class="tab" role="tab" data-tab="settings" aria-selected="false">점검 기준값</button>
+  </nav>
+
+  <section class="needs-data" data-pane="list">
+    <div class="bar">
+      <div class="filters" id="gradeFilter"></div>
+      <div class="controls">
+        <span class="src" id="reviewProgress"></span>
+        <button class="btn" id="copyBtn" type="button">표 복사(엑셀 붙여넣기용)</button>
+        <button class="btn primary" id="xlsxBtn" type="button">결과 엑셀 저장</button>
+      </div>
+    </div>
+    <div class="tbl-wrap"><table id="listTbl"></table></div>
+    <div id="detail"></div>
+  </section>
+
+  <section class="needs-data" data-pane="answer" hidden>
+    <div class="bar"><div class="src" id="ansSummary"></div></div>
+    <div class="tbl-wrap"><table id="ansTbl"></table></div>
+  </section>
+
+  <section class="needs-data" data-pane="period" hidden>
+    <div class="grid2">
+      <div class="panel chart">
+        <h2>월별 사용액 추이 <small>막대 = 월 사용액, 선 = 3개월 이동평균</small></h2>
+        <div id="chart"></div>
+        <div class="legend"><span><i style="background:var(--rule)"></i>월 사용액</span><span><i style="background:var(--accent)"></i>점검 대상월</span><span><i style="background:var(--mid);height:2px"></i>3개월 이동평균</span></div>
+      </div>
+      <div class="panel">
+        <h2>월별 집계 <small>건수 · 금액 · 건당평균 · 전월 대비</small></h2>
+        <div class="tbl-wrap" style="border:0"><table id="monthTbl"></table></div>
+      </div>
+    </div>
+    <div class="grid2" id="patterns" style="margin-top:14px"></div>
+  </section>
+
+  <section class="needs-data" data-pane="recs" hidden>
+    <div class="bar">
+      <div class="src">기존 규칙(R01~R17, T-R1~T-R4)에 없는 패턴을 최근 3개월 집계에서 찾아 제안합니다.</div>
+    </div>
+    <div class="recs" id="recs"></div>
+  </section>
+
+  <section class="needs-data" data-pane="settings" hidden>
+    <div class="panel">
+      <h2>기준값 <small>바꾸면 즉시 다시 계산합니다. 기본값은 점검기준(가상) 시트</small></h2>
+      <div class="settings" id="params"></div>
+      <h2 style="margin-top:16px">위험 가중치 <small>등급: 금지업종 → 상 · 6점 이상 상 · 3~5 중 · 1~2 하</small></h2>
+      <div class="settings" id="weights"></div>
+      <div style="margin-top:12px"><button class="btn" id="resetParams" type="button">기본값으로</button></div>
+    </div>
+  </section>
+
+  <footer class="foot">처리 순서: 엑셀 읽기 → 텍스트 컬럼 정리(G/L 계정·승인시간·예산부서·업종코드) → 승인일시·휴일 계산 → 취소 상계 → R01~R17 → 위험점수·등급 → AI 오탐 조정 → T-R1~T-R4. 검토결과·의견은 이 PC의 브라우저에 임시 저장되므로, 반드시 결과 엑셀로 저장해 보관하세요.<br>v1.0 · 엑셀 읽기·쓰기: SheetJS Community Edition 0.18.5 (Apache-2.0, 파일에 포함)</footer>
+</div>
