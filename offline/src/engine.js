@@ -20,6 +20,58 @@ const ENGINE = (() => {
   const TRAVEL_WORDS = /출장|이동|택시|귀가|방문|외근|교통/;
   const DIST_EXCLUDE = new Set(["온라인쇼핑", "PG일반(인증)", "해외가맹점", "택시", "항공사", "철도", "주유소", "주차장", "고속버스"]);
 
+  // ── 추가조건(사용자 정의 단건 조건): 기준표 '추가조건' 시트, 같은 조건ID 행은 AND ──
+  const OPS = ["같음", "다름", "포함", "미포함", "시작", "이상", "이하", "초과", "미만", "목록중하나", "비어있음", "비어있지않음"];
+  const DERIVED = {
+    요일: (r) => r.wdName, 승인시: (r) => r.hour, 휴일: (r) => (r.holiday ? "Y" : "N"), 승인월: (r) => r.month,
+    공휴일명: (r) => r.holName, 시도: (r) => sido(r.addr), 제한구분: (r) => r.restrict,
+  };
+  let CUSTOM = new Map();
+  const ruleName = (id) => RULE_NAMES[id] || CUSTOM.get(id)?.name || id;
+  function parseCustom(rows, columns) {
+    const known = new Set([...columns, ...Object.keys(DERIVED)]);
+    const byId = new Map(), errors = [];
+    rows.forEach((x, i) => {
+      const id = str(x["조건ID"]), col = str(x["컬럼"]), op = str(x["비교"]).replace(/\s/g, "");
+      if (!id && !col) return;
+      const where = `추가조건 ${i + 2}행${id ? `(${id})` : ""}`;
+      if (!/^U\d+$/i.test(id)) return errors.push(`${where}: 조건ID는 U01처럼 U로 시작하는 번호로 적어 주세요.`);
+      if (!known.has(col)) return errors.push(`${where}: '${col}' 컬럼이 SAP 엑셀에 없습니다.`);
+      if (!OPS.includes(op)) return errors.push(`${where}: 비교 '${op}'는 쓸 수 없습니다. (${OPS.join(", ")})`);
+      const val = x["값"] instanceof Date ? ymd(toDate(x["값"])) : str(x["값"]);
+      if (["이상", "이하", "초과", "미만"].includes(op) && (val === "" || !isFinite(+val.replace(/[,\s원]/g, "")))) return errors.push(`${where}: '${op}' 비교에는 숫자 값을 적어 주세요.`);
+      const key = id.toUpperCase();
+      if (!byId.has(key)) byId.set(key, { id: key, name: "", weight: null, conds: [] });
+      const rule = byId.get(key);
+      if (str(x["조건명"]) && !rule.name) rule.name = str(x["조건명"]);
+      if (str(x["가중치"]) !== "" && rule.weight === null) rule.weight = num(x["가중치"]);
+      rule.conds.push({ col, op, val });
+    });
+    const rules = [...byId.values()].map((r) => ({ ...r, name: r.name || r.id, weight: r.weight ?? 1 }));
+    return { rules, errors };
+  }
+  // 추가조건 비교용 숫자 변환: 숫자가 아니면 NaN (num()은 0을 돌려주므로 쓰지 않음)
+  const strictNum = (v) => { const t = String(v ?? "").replace(/[,\s원]/g, ""); return t !== "" && isFinite(+t) ? +t : NaN; };
+  function testCond(r, c) {
+    const v = c.col in DERIVED ? DERIVED[c.col](r) : r.raw[c.col];
+    const sv = v instanceof Date ? ymd(toDate(v)) : str(v);
+    switch (c.op) {
+      case "같음": return sv === c.val || (!isNaN(strictNum(sv)) && strictNum(sv) === strictNum(c.val));
+      case "다름": return !testCond(r, { ...c, op: "같음" });
+      case "포함": return sv.includes(c.val);
+      case "미포함": return !sv.includes(c.val);
+      case "시작": return sv.startsWith(c.val);
+      case "이상": return strictNum(sv) >= strictNum(c.val);
+      case "이하": return strictNum(sv) <= strictNum(c.val);
+      case "초과": return strictNum(sv) > strictNum(c.val);
+      case "미만": return strictNum(sv) < strictNum(c.val);
+      case "목록중하나": return c.val.split(",").map((x) => x.trim()).includes(sv);
+      case "비어있음": return sv === "";
+      case "비어있지않음": return sv !== "";
+    }
+    return false;
+  }
+
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const ymd = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   const parseYmd8 = (s) => { s = String(s).replace(/\D/g, ""); return new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8))); };
@@ -101,7 +153,7 @@ const ENGINE = (() => {
         gl: str(r["G/L 계정"]), glName: str(r["G/L 계정명"]) || (acc ? acc.name : ""), industry: str(r["가맹점업종"]) || (ind ? ind.name : ""), indCode: str(r["업종코드"]),
         merchant: str(r["가맹점명"]), addr: str(r["가맹점주소"]), amount: num(r["전표금액"]), cancel: str(r["취소구분"]) === "취소",
         title: str(r["결재문서제목"]), memo: str(r["전표 품목 텍스트"]), overseas: str(r["국내해외코드명"]) === "해외", currency: str(r["통화"]),
-        acctDate: toDate(r["회계일자"]), restrict: ind ? ind.restrict : "일반", limit: acc ? acc.limit : null, allowed: acc ? acc.allowed : null,
+        raw: r, acctDate: toDate(r["회계일자"]), restrict: ind ? ind.restrict : "일반", limit: acc ? acc.limit : null, allowed: acc ? acc.allowed : null,
       });
     }
     // 취소 상계: 같은 카드·가맹점·절대금액, 승인일시가 가장 가까운 미매칭 매입
@@ -122,7 +174,8 @@ const ENGINE = (() => {
   }
 
   // ── 단건·다건 규칙 ──
-  function applyRules(all, ref, P) {
+  function applyRules(all, ref, P, custom = []) {
+    CUSTOM = new Map(custom.map((c) => [c.id, c]));
     const rows = all.filter((r) => !r.excluded);
     for (const r of rows) r.hits = new Set();
     const hit = (r, id) => r.hits.add(id);
@@ -179,6 +232,7 @@ const ENGINE = (() => {
       }
     }
     // 위험점수·등급 + AI 오탐 조정
+    for (const c of custom) for (const r of rows) if (c.conds.every((x) => testCond(r, x))) hit(r, c.id);
     const W = ref.weights;
     for (const r of rows) {
       r.ruleScore = [...r.hits].reduce((s, id) => s + (W[id] || 0), 0);
@@ -227,6 +281,7 @@ const ENGINE = (() => {
     if (h.has("R14")) p.push(`원거리 근접 사용: ${r.distNote}`);
     if (h.has("R15")) p.push(`승인 후 ${Math.round((r.acctDate - r.date) / 86400000)}일 지나 정산`);
     if (h.has("R16")) p.push("공용카드인데 실제 사용자 미기재");
+    for (const id of h) if (CUSTOM.has(id)) p.push(`추가조건 '${CUSTOM.get(id).name}' 해당`);
     if (h.has("R17")) p.push(`${r.vacation.kind || "휴가"} 기간(${ymd(r.vacation.from)}~${ymd(r.vacation.to)}) 중 사용`);
     return p;
   }
@@ -252,6 +307,7 @@ const ENGINE = (() => {
       else if (id === "R06") out.push(r.glName.includes("접대비") ? "접대 상대방(소속·직함·인원)과 목적 확인" : "적요 보완 요청(사용 목적·참석자)");
       else out.push(CHECK[id]);
     }
+    for (const id of r.hits) if (CUSTOM.has(id)) out.push(`추가조건 '${CUSTOM.get(id).name}' 해당 사유 확인`);
     return [...new Set(out)];
   }
 
@@ -426,7 +482,7 @@ const ENGINE = (() => {
     });
   }
 
-  return { RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
+  return { OPS, DERIVED: Object.keys(DERIVED), ruleName, parseCustom, RULE_NAMES, RULE_IDS, T_NAMES, DEFAULT_PARAMS, DEFAULT_WEIGHTS, buildRef, prepare, applyRules, periodRules, selectMonth, grade, recommend, monthlySummary, addMonths, won, ymd, toDate, businessDays };
 })();
 
 

@@ -9,8 +9,8 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   };
 
-  const REF_SHEETS = { accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준", employees: "직원마스터", vacations: "휴가내역" };
-  const REF_LABELS = { accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준", employees: "직원마스터", vacations: "휴가내역" };
+  const REF_SHEETS = { accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준", employees: "직원마스터", vacations: "휴가내역", custom: "추가조건" };
+  const REF_LABELS = REF_SHEETS;
   const S = {
     source: "none", files: [], raw: new Map(), sheetRows: 0, readCount: 0, refRaw: {}, refFiles: {}, answers: null, loadMs: 0,
     params: { ...ENGINE.DEFAULT_PARAMS }, weights: null, month: null, tab: store.get("cc_tab", "list"), grade: "전체", sel: null,
@@ -24,9 +24,13 @@
     document.body.classList.remove("is-empty");
     const t0 = performance.now();
     const ref = ENGINE.buildRef(S.refRaw);
-    if (S.weights) Object.assign(ref.weights, S.weights); else S.weights = { ...ref.weights };
+    const columns = [...new Set([...S.raw.values()].slice(0, 50).flatMap((r) => Object.keys(r)))];
+    const custom = ENGINE.parseCustom(S.refRaw.custom || [], columns);
+    for (const c of custom.rules) ref.weights[c.id] = c.weight;
+    if (S.weights) Object.assign(ref.weights, S.weights);
+    S.weights = { ...ref.weights };
     const prep = ENGINE.prepare([...S.raw.values()], ref);
-    const rows = ENGINE.applyRules(prep.rows, ref, S.params);
+    const rows = ENGINE.applyRules(prep.rows, ref, S.params, custom.rules);
     const months = [...new Set(rows.map((r) => r.month))].sort();
     if (!S.month || !months.includes(S.month)) S.month = months[months.length - 1];
     const period = ENGINE.periodRules(rows, ref, S.params, S.month);
@@ -35,7 +39,7 @@
     // 기간 규칙에 걸린 대상월 건도 목록에 표시 (단건 점수 없음 → T 표시만)
     const recs = ENGINE.recommend(rows, ref, S.month);
     const summary = ENGINE.monthlySummary(rows);
-    R = { ref, prep, rows, months, period, graded, list, recs, summary };
+    R = { ref, prep, rows, months, period, graded, list, recs, summary, custom, columns };
     render();
     S.ms = S.loadMs + (performance.now() - t0);
     renderScore();
@@ -47,7 +51,7 @@
     const refTxt = Object.entries(REF_LABELS).map(([k, v]) => `${v} ${S.refRaw[k]?.length ? "✓" : "–"}`).join(" · ");
     const srcTxt = `<span class="tag">업로드</span> ${S.files.map(esc).join(", ")} · 승인번호 기준 중복 제거 후 ${fmt(S.raw.size)}건 · 기준표: ${refTxt}`;
     $("#srcLine").innerHTML = srcTxt + ` · 분석 대상 ${fmt(R.rows.length)}건 (취소 ${R.prep.stats.cancels}건 상계 제외 ${R.prep.stats.matched * 2}건${R.prep.stats.unmatched ? `, 미매칭 ${R.prep.stats.unmatched}건` : ""})`;
-    renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderSettings();
+    renderTabs(); renderList(); renderAnswers(); renderPeriod(); renderRecs(); renderSettings(); renderBrowseFilters(); renderBrowse();
   }
 
   function renderScore() {
@@ -93,7 +97,7 @@
     if (!R.graded && S.tab === "answer") { S.tab = "list"; renderTabs(); }
   }
 
-  const ruleChips = (r) => [...r.hits].sort().map((h) => `<span class="chip" title="${ENGINE.RULE_NAMES[h]}">${h}</span>`).join("") + [...(r.tHits || [])].map((h) => `<span class="chip t" title="${ENGINE.T_NAMES[h]}">${h}</span>`).join("");
+  const ruleChips = (r) => [...r.hits].sort().map((h) => `<span class="chip${h.startsWith("U") ? " u" : ""}" title="${ENGINE.ruleName(h)}">${h}</span>`).join("") + [...(r.tHits || [])].map((h) => `<span class="chip t" title="${ENGINE.T_NAMES[h]}">${h}</span>`).join("");
 
   function renderList() {
     const counts = { 전체: R.list.length, 상: 0, 중: 0, 하: 0 };
@@ -129,7 +133,7 @@
           <dt>결재문서제목</dt><dd>${esc(r.title)}</dd>
           <dt>적요</dt><dd>${r.memo ? esc(r.memo) : '<span class="ng-txt">공란</span>'}</dd>
           <dt>회계일자</dt><dd class="mono">${r.acctDate ? ENGINE.ymd(r.acctDate) : "-"}</dd>
-          <dt>걸린 규칙</dt><dd>${[...r.hits].sort().map((h) => `${h} ${ENGINE.RULE_NAMES[h]}`).join(" · ")}${[...r.tHits].map((h) => ` · ${h} ${ENGINE.T_NAMES[h]}`).join("")}</dd>
+          <dt>걸린 규칙</dt><dd>${[...r.hits].sort().map((h) => `${h} ${ENGINE.ruleName(h)}`).join(" · ")}${[...r.tHits].map((h) => ` · ${h} ${ENGINE.T_NAMES[h]}`).join("")}</dd>
         </dl>
       </div>
       <div style="display:grid;gap:12px;align-content:start">
@@ -221,8 +225,87 @@
   function renderSettings() {
     const labels = { nightStart: "R02 심야 시작(시, 이상)", nightEnd: "R02 심야 종료(시, 미만)", splitGap: "R04 분할결제 간격(분)", memoMin: "R06 적요 최소 글자수", settleDays: "R15 정산 기한(일)", round: "R12 라운드 단위(원)", sharedMin: "R16 공용카드 기준금액(원)", distGap: "R14 원거리 간격(분)", t1Count: "T-R1 3개월 반복 횟수", t2Ratio: "T-R2 급증 배율", t2Floor: "T-R2 최소 월 사용액(원)", t3Share: "T-R3 월말 비중(0~1)", t3Mult: "T-R3 부서 평균 배수", t4Months: "T-R4 연속 개월" };
     $("#params").innerHTML = Object.keys(labels).map((k) => `<label for="p_${k}">${labels[k]}<input id="p_${k}" data-p="${k}" type="number" step="any" value="${S.params[k]}"></label>`).join("");
-    $("#weights").innerHTML = ENGINE.RULE_IDS.map((k) => `<label for="w_${k}">${k} ${ENGINE.RULE_NAMES[k]}<input id="w_${k}" data-w="${k}" type="number" min="0" max="10" value="${S.weights[k]}"></label>`).join("");
+    $("#weights").innerHTML = ENGINE.RULE_IDS.concat(R.custom.rules.map((c) => c.id)).map((k) => `<label for="w_${k}">${k} ${esc(ENGINE.ruleName(k))}<input id="w_${k}" data-w="${k}" type="number" min="0" max="10" value="${S.weights[k]}"></label>`).join("");
   }
+
+  function renderCustom() {
+    const { rules, errors } = R.custom;
+    const hitN = (id) => R.rows.filter((r) => r.hits.has(id)).length;
+    const monthN = (id) => R.list.filter((r) => r.hits.has(id)).length;
+    $("#customList").innerHTML = (errors.length ? `<div class="notice" style="border-left-color:var(--high)">${errors.map(esc).join("<br>")}</div>` : "") +
+      (rules.length ? `<div class="tbl-wrap"><table><thead><tr><th>ID</th><th>조건명</th><th>조건 (모두 만족)</th><th style="text-align:right">가중치</th><th style="text-align:right">전체 적중</th><th style="text-align:right">${S.month} 선별</th></tr></thead><tbody>` +
+        rules.map((c) => `<tr><td class="mono">${c.id}</td><td>${esc(c.name)}</td><td>${c.conds.map((x) => `<span class="chip">${esc(x.col)} ${esc(x.op)}${x.val !== "" ? " " + esc(x.val) : ""}</span>`).join(" ")}</td><td class="n">${S.weights[c.id]}</td><td class="n">${hitN(c.id)}</td><td class="n">${monthN(c.id)}</td></tr>`).join("") + "</tbody></table></div>"
+        : `<p class="empty">기준표에 '추가조건' 시트가 없거나 비어 있습니다. 기준표 양식을 내려받으면 예시가 들어 있습니다.</p>`);
+  }
+
+  // ── 거래 조회 ──
+  const B = { period: "month", q: "", gl: "", ind: "", dept: "", min: "", max: "", sel: "", hol: false, cancel: false };
+  function renderBrowseFilters() {
+    const all = R.prep.rows;
+    const opts = (key) => ["", ...[...new Set(all.map((r) => r[key]).filter(Boolean))].sort()].map((v) => `<option value="${esc(v)}" ${B[{ glName: "gl", industry: "ind", dept: "dept" }[key]] === v ? "selected" : ""}>${v ? esc(v) : "전체"}</option>`).join("");
+    $("#b_gl").innerHTML = opts("glName"); $("#b_ind").innerHTML = opts("industry"); $("#b_dept").innerHTML = opts("dept");
+    renderCustom();
+  }
+  function browseRows() {
+    const q = B.q.trim();
+    return R.prep.rows.filter((r) => {
+      if (B.period === "month" && r.month !== S.month) return false;
+      if (!B.cancel && r.excluded) return false;
+      if (B.gl && r.glName !== B.gl) return false;
+      if (B.ind && r.industry !== B.ind) return false;
+      if (B.dept && r.dept !== B.dept) return false;
+      if (B.min !== "" && r.amount < Number(B.min)) return false;
+      if (B.max !== "" && r.amount > Number(B.max)) return false;
+      if (B.hol && !r.holiday) return false;
+      const flagged = !r.excluded && r.score > 0;
+      if (B.sel === "y" && !flagged) return false;
+      if (B.sel === "n" && flagged) return false;
+      if (q && ![r.merchant, r.memo, r.emp, r.title, r.no, r.card].some((x) => String(x).includes(q))) return false;
+      return true;
+    }).sort((a, b) => a.dt - b.dt);
+  }
+  function renderBrowse() {
+    const rows = browseRows();
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+    const shown = rows.slice(0, 500);
+    $("#b_summary").innerHTML = `<b>${fmt(rows.length)}건</b> · 합계 ${won(total)}${rows.length > 500 ? " · 화면에는 앞 500건만 표시하고, 엑셀 저장에는 전부 들어갑니다" : ""}`;
+    $("#browseTbl").innerHTML = `<thead><tr><th>등급</th><th>규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점</th><th>계정</th><th style="text-align:right">금액</th><th>적요</th></tr></thead><tbody>` +
+      (shown.length ? shown.map((r) => `<tr class="${r.grade ? "sev-" + r.grade : ""}"><td>${r.excluded ? '<span class="muted">상계</span>' : r.grade ? `<span class="g g-${r.grade}">${r.grade}</span>` : ""}</td>
+        <td><div class="chips">${r.excluded ? "" : ruleChips(r)}</div></td><td class="mono" style="white-space:nowrap">${r.dkey.slice(5)} ${r.time}<div class="muted">${r.holName || r.wdName}</div></td>
+        <td style="white-space:nowrap">${esc(r.emp) || '<span class="muted">미기재</span>'}<div class="muted">${esc(r.dept)}</div></td><td>${esc(r.merchant)}<div class="muted">${esc(r.industry)}</div></td>
+        <td>${esc(r.glName)}</td><td class="n">${fmt(r.amount)}</td><td class="reason">${esc(r.memo)}</td></tr>`).join("")
+        : `<tr><td colspan="8" class="empty">조건에 맞는 거래가 없습니다.</td></tr>`) + "</tbody>";
+  }
+  function browseExport() {
+    const rows = browseRows();
+    const cols = R.columns;
+    const data = rows.map((r) => {
+      const o = {};
+      for (const c of cols) o[c] = r.raw[c] ?? "";
+      o["등급"] = r.excluded ? "취소상계" : r.grade || "";
+      o["위험점수"] = r.excluded ? "" : r.score;
+      o["걸린 규칙"] = r.excluded ? "" : [...r.hits].sort().map((h) => `${h} ${ENGINE.ruleName(h)}`).concat([...r.tHits].map((h) => `${h} ${ENGINE.T_NAMES[h]}`)).join(" / ");
+      return o;
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "조건에 맞는 거래가 없습니다" }]), "거래조회");
+    const cond = [["조회 조건"], ["기간", B.period === "month" ? S.month : "전체 기간"], ["검색어", B.q], ["계정", B.gl || "전체"], ["업종", B.ind || "전체"], ["부서", B.dept || "전체"],
+      ["금액", `${B.min || "-"} ~ ${B.max || "-"}`], ["선별", { "": "전체", y: "선별된 건만", n: "선별 안 된 건만" }[B.sel]], ["휴일만", B.hol ? "예" : "아니오"], ["취소·상계 포함", B.cancel ? "예" : "아니오"], ["건수", rows.length]];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cond), "조회조건");
+    saveFile(wb, `card-audit_browse_${B.period === "month" ? S.month : "all"}.xlsx`);
+    flash("#b_xlsx", "저장했습니다");
+  }
+  $("#browseFilters").addEventListener("input", (e) => {
+    const k = e.target.dataset.b; if (!k) return;
+    B[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    renderBrowse();
+  });
+  $("#b_reset").addEventListener("click", () => {
+    Object.assign(B, { period: "month", q: "", gl: "", ind: "", dept: "", min: "", max: "", sel: "", hol: false, cancel: false });
+    document.querySelectorAll("#browseFilters [data-b]").forEach((el) => { if (el.type === "checkbox") el.checked = false; else el.value = B[el.dataset.b]; });
+    renderBrowseFilters(); renderBrowse();
+  });
+  $("#b_xlsx").addEventListener("click", browseExport);
 
   // ── 이벤트 ──
   $("#tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (!b) return; S.tab = b.dataset.tab; store.set("cc_tab", S.tab); renderTabs(); });
@@ -249,7 +332,11 @@
     const wb = XLSX.utils.book_new();
     const guide = [["기준표 양식 안내"], ["이 파일의 값은 교육용 가상값입니다. 내부망에서 실제 사내 기준으로 바꿔 쓰세요."], ["시트 이름은 바꾸지 마세요. 컬럼 순서는 바뀌어도 되지만 컬럼명은 그대로 두세요."],
       ["계정코드: G/L 계정, G/L 계정명, 허용 가맹점업종(쉼표 구분), 건당 한도(원)"], ["업종코드: 업종코드, 가맹점업종, 제한구분(금지/사전승인/주의/일반)"], ["공휴일: 일자, 명칭 (주말은 자동 계산)"],
-      ["점검기준: 규칙ID, 점검항목, 위험가중치"], ["직원마스터: 사번, 이름, 부서, 근무지 (R13 근무지 판단)"], ["휴가내역: 사번, 이름, 휴가구분, 시작일, 종료일 (R17)"]];
+      ["점검기준: 규칙ID, 점검항목, 위험가중치"], ["직원마스터: 사번, 이름, 부서, 근무지 (R13 근무지 판단)"], ["휴가내역: 사번, 이름, 휴가구분, 시작일, 종료일 (R17)"],
+      [""], ["추가조건: 반입 없이 내부망에서 점검 조건을 추가하는 시트"], ["- 조건ID는 U01, U02… 처럼 적고, 같은 조건ID의 행은 모두 만족해야 걸립니다(AND). 조건명·가중치는 그 ID의 첫 행에 적습니다."],
+      ["- 컬럼: SAP 엑셀의 컬럼명 그대로(예: 가맹점업종, 전표금액, 전표 품목 텍스트, 결재문서제목) 또는 계산 컬럼(" + ENGINE.DERIVED.join(", ") + ")"],
+      ["- 비교: " + ENGINE.OPS.join(", ")], ["- 목록중하나는 값에 쉼표로 여러 개를 적습니다(예: 토,일). 승인시는 0~23 숫자, 휴일은 Y/N입니다."],
+      ["- 예시 2개는 실제 기준이 아니니 지우거나 바꿔 쓰세요."]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guide), "안내");
     for (const [k, name] of Object.entries(REF_SHEETS)) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(DEFAULT_REF[k]), name);
     saveFile(wb, "card-audit_reference-template.xlsx");
@@ -280,14 +367,14 @@
   function exportRows() {
     return R.list.map((r) => ({
       승인번호: r.no, 승인일시: `${r.dkey} ${r.time}`, 직원: r.emp || "미기재", 부서: r.dept, 가맹점: r.merchant, 업종: r.industry, 계정: r.glName, 금액: r.amount,
-      "걸린 규칙": [...r.hits].sort().map((h) => `${h} ${ENGINE.RULE_NAMES[h]}`).concat([...r.tHits].map((h) => `${h} ${ENGINE.T_NAMES[h]}`)).join(" / "),
+      "걸린 규칙": [...r.hits].sort().map((h) => `${h} ${ENGINE.ruleName(h)}`).concat([...r.tHits].map((h) => `${h} ${ENGINE.T_NAMES[h]}`)).join(" / "),
       위험점수: r.score, 등급: r.grade, "선별 사유": r.reason, 추가확인사항: r.checks.join("; "),
       검토결과: S.reviews[r.no]?.result || "", 검토의견: S.reviews[r.no]?.opinion || "",
     }));
   }
 
   // ── 데이터 불러오기 ──
-  const SHEETS = { tx: "전체", accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준(가상)", employees: "직원마스터", vacations: "휴가내역", answers: "정답지" };
+  const SHEETS = { custom: "추가조건", tx: "전체", accounts: "계정코드", industries: "업종코드", holidays: "공휴일", rules: "점검기준(가상)", employees: "직원마스터", vacations: "휴가내역", answers: "정답지" };
   async function loadFiles(files) {
     const t0 = performance.now();
     if (typeof XLSX === "undefined") { $("#srcLine").innerHTML = '<span class="ng-txt">엑셀 읽기 라이브러리를 불러오지 못했습니다. 페이지를 새로 고친 뒤 다시 올려 주세요.</span>'; return; }
@@ -304,7 +391,7 @@
           for (const r of rows) { const k = String(r["승인번호"] ?? "").trim(); if (!k) continue; if (!S.raw.has(k)) added++; S.raw.set(k, r); }
           S.readCount += rows.filter((r) => String(r["승인번호"] ?? "").trim()).length;
         }
-        for (const key of ["accounts", "industries", "holidays", "rules", "employees", "vacations"]) {
+        for (const key of ["accounts", "industries", "holidays", "rules", "employees", "vacations", "custom"]) {
           const n = find(SHEETS[key]); if (n) { S.refRaw[key] = read(n); }
         }
         const an = find(SHEETS.answers); if (an) S.answers = read(an);
@@ -315,7 +402,7 @@
         if (restored) store.set("cc_reviews", S.reviews);
         S.files.push(f.name);
       } catch (err) {
-        S.errors = (S.errors || []).concat(f.name);
+        console.error(f.name, err); S.errors = (S.errors || []).concat(f.name);
       }
     }
     S.source = "upload"; S.month = null; S.sel = null; S.weights = null;

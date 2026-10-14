@@ -26,6 +26,23 @@ const checks = [
   ["추가 점검항목 추천", `${ENGINE.recommend(rows, ref, month).length}건`, ENGINE.recommend(rows, ref, month).length >= 3],
 ];
 console.log(`분석 대상 ${rows.length}건 (취소 ${stats.cancels}건 상계) · ${month} 선별 ${sel.length}건 (상 ${cnt.상} · 중 ${cnt.중} · 하 ${cnt.하}) · 기간 패턴 ${Object.values(period).reduce((s, x) => s + x.length, 0)}건`);
+// 추가조건 자체 시험: 엔진 판정과 직접 계산한 건수가 같은지, 잘못된 행은 오류로 걸러지는지
+const cp = ENGINE.parseCustom([
+  { 조건ID: "U90", 조건명: "백화점 10만원 이상", 컬럼: "가맹점업종", 비교: "같음", 값: "백화점", 가중치: 2 },
+  { 조건ID: "U90", 컬럼: "전표금액", 비교: "이상", 값: 100000 },
+  { 조건ID: "U91", 조건명: "주말", 컬럼: "요일", 비교: "목록중하나", 값: "토,일", 가중치: 1 },
+  { 조건ID: "U92", 조건명: "적요 공란", 컬럼: "전표 품목 텍스트", 비교: "비어있음", 값: "", 가중치: 1 },
+  { 조건ID: "U93", 조건명: "오류 확인용", 컬럼: "없는컬럼", 비교: "같음", 값: "x" },
+  { 조건ID: "X1", 조건명: "오류 확인용", 컬럼: "전표금액", 비교: "같음", 값: "1" },
+], Object.keys(tx[0]));
+const cref = ENGINE.buildRef({ accounts: sheet("계정코드"), industries: sheet("업종코드"), holidays: sheet("공휴일"), rules: sheet("점검기준"), employees: sheet("직원마스터"), vacations: sheet("휴가내역") });
+cp.rules.forEach((c) => (cref.weights[c.id] = c.weight));
+const crow = ENGINE.applyRules(ENGINE.prepare(tx, cref).rows, cref, ENGINE.DEFAULT_PARAMS, cp.rules);
+const got = (id) => crow.filter((r) => r.hits.has(id)).length;
+const want = { U90: crow.filter((r) => r.industry === "백화점" && r.amount >= 100000).length, U91: crow.filter((r) => r.wd === 0 || r.wd === 6).length, U92: crow.filter((r) => !r.memo).length };
+const sameScore = crow.filter((r) => r.hits.has("U90") && !r.adjust).every((r) => r.ruleScore === [...r.hits].reduce((s, h) => s + (cref.weights[h] || 0), 0));
+checks.push(["추가조건 판정", Object.keys(want).map((k) => `${k} ${got(k)}/${want[k]}`).join(", ") + `, 오류행 ${cp.errors.length}/2`, Object.keys(want).every((k) => got(k) === want[k]) && cp.errors.length === 2 && cp.rules.length === 3 && sameScore]);
+
 for (const [k, v, ok] of checks) console.log(`${ok ? "통과" : "실패"}  ${k}: ${v}`);
 for (const o of g.list.filter((o) => o.type !== "FP" && !o.detected)) console.log(`  미탐 ${o.id} ${o.title} — ${o.note}`);
 process.exit(checks.every((c) => c[2]) ? 0 : 1);
