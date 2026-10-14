@@ -94,8 +94,14 @@ tbody tr.click { cursor: pointer; }
 tbody tr.rvrow-적정 td { background: var(--row-ok); }
 tbody tr.rvrow-소명요청 td { background: var(--row-ask); }
 tbody tr.rvrow-부적정 td { background: var(--row-ng); }
-tbody tr.click:hover td { background: var(--accent-soft); }
-tbody tr.on td { background: var(--accent-soft); }
+/* 마우스를 올린 행: 바탕색 대신 위아래 얇은 선 */
+tbody tr.click:hover td { box-shadow: inset 0 1px 0 var(--ink-3), inset 0 -1px 0 var(--ink-3); }
+/* 선택한 행: 검토결과 바탕색은 그대로 두고, 행과 바로 아래 펼친 상세를 테두리로 묶음 */
+tbody tr.on td { border-top: 2px solid var(--ink); }
+tbody tr.on td:first-child { border-left: 2px solid var(--ink); }
+tbody tr.on td:last-child { border-right: 2px solid var(--ink); }
+tbody tr.detail-row > td { border-left: 2px solid var(--ink); border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); background: var(--paper); padding: 12px 14px 14px; }
+tbody tr.detail-row .detail { margin-top: 0; }
 .g { display: inline-grid; place-items: center; width: 24px; height: 22px; border-radius: 4px; font-weight: 700; font-size: 12px; }
 .g-상 { background: var(--high-soft); color: var(--high); }
 .g-중 { background: var(--mid-soft); color: var(--mid); }

@@ -202,6 +202,8 @@
     const rows = R.list.filter((r) => (S.grade === "전체" || r.grade === S.grade) && (S.review === "전체" || reviewOf(r) === S.review) && (!S.ruleFilter || r.hits.has(S.ruleFilter) || r.tHits.has(S.ruleFilter)));
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
     $("#reviewProgress").textContent = `검토 입력 ${done}/${R.list.length}건`;
+    // 상세 영역을 표 밖으로 되돌린 뒤 표를 다시 그리고, 선택한 행 바로 아래로 옮김
+    const det = $("#detail"); if (det.closest("#listTbl")) $("#listTbl").closest(".tbl-wrap").after(det);
     $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점 · 적요</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
       (rows.length ? rows.map((r) => { const m = spotMarker(r); return `<tr class="click sev-${r.grade} rvrow-${S.reviews[r.no]?.result || "미검토"} ${S.sel === r.no ? "on" : ""}" data-no="${r.no}" tabindex="0">
         <td><span class="g g-${r.grade}">${r.grade}</span></td><td class="n">${r.score}${r.adjust ? `<div class="muted" title="사전승인 기재로 조정">${r.ruleScore}→${r.score}</div>` : ""}</td>
@@ -213,6 +215,8 @@
         <td class="n">${m("amt", fmt(r.amount))}${r.limit && (r.hits.has("R05") || r.hits.has("R04")) ? `<div class="muted">한도 ${fmt(r.limit)}</div>` : ""}</td>
         <td class="reason"><ul class="why">${ENGINE.reasonParts(r).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></td><td style="white-space:nowrap">${reviewPill(r)}</td></tr>`; }).join("")
         : `<tr><td colspan="9" class="empty">선택한 조건(등급·검토결과·규칙)에 해당하는 선별 건이 없습니다.</td></tr>`) + "</tbody>";
+    const selTr = S.sel && document.querySelector(`#listTbl tr[data-no="${S.sel}"]`);
+    if (selTr) { const tr = document.createElement("tr"); tr.className = "detail-row"; tr.innerHTML = '<td colspan="9"></td>'; selTr.after(tr); tr.firstChild.append(det); }
     renderDetail();
   }
 
