@@ -1,13 +1,16 @@
-"""법인카드 사용 적정성 점검 PoC — 1단계(데이터 정리) + 2단계(규칙 기반 선별) + 3단계(AI 코멘트)."""
+"""법인카드 사용 적정성 점검 PoC — 1단계 데이터 정리 · 2단계 규칙 선별 · 3단계 AI 코멘트 · 4단계 기간 분석."""
 import io
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
-from src.ai import DISCLAIMER, _sabun, annotate, claude_available, claude_comment, read_workplaces
-from src.loader import load_all, monthly_summary
+from src.ai import (DISCLAIMER, _sabun, annotate, claude_available, claude_comment, claude_recommend,
+                    read_workplaces)
+from src.loader import load_all, monthly_summary, read_holidays
+from src.patterns import TParams, aggregate, detect_all, monthly_by_user, prepare, recommend
 from src.rules import (STAGE2_RULES, Params, apply_rules, default_params, read_reference,
                        rule_names, select_for_month)
 
@@ -30,7 +33,7 @@ AI_NOTICE = ("※ 선별 결과는 점검이 필요한 거래를 고르기 위�
 
 st.set_page_config(page_title="법인카드 점검 PoC", layout="wide")
 st.title("법인카드 사용 적정성 점검 PoC")
-st.caption("1단계 데이터 정리 · 2단계 규칙 기반 선별 · 3단계 AI 코멘트  |  모든 데이터는 교육용 가상 데이터입니다.")
+st.caption("1단계 데이터 정리 · 2단계 규칙 기반 선별 · 3단계 AI 코멘트 · 4단계 기간 분석  |  모든 데이터는 교육용 가상 데이터입니다.")
 
 
 def _src(source):
@@ -39,15 +42,16 @@ def _src(source):
 
 @st.cache_data(show_spinner="엑셀을 읽는 중…")
 def load(source):
-    return load_all(_src(source)), read_reference(_src(source)), read_workplaces(_src(source))
+    return (load_all(_src(source)), read_reference(_src(source)), read_workplaces(_src(source)),
+            set(read_holidays(_src(source))["일자"]))
 
 
 uploaded = st.sidebar.file_uploader("SAP 추출 엑셀 업로드 (.xlsx)", type="xlsx")
 if uploaded is not None:
-    df, ref, workplaces = load(uploaded.getvalue())
+    df, ref, workplaces, holidays = load(uploaded.getvalue())
     st.sidebar.success(f"업로드 파일 사용: {uploaded.name}")
 elif DEFAULT_FILE.exists():
-    df, ref, workplaces = load(str(DEFAULT_FILE))
+    df, ref, workplaces, holidays = load(str(DEFAULT_FILE))
     st.sidebar.info(f"기본 파일 사용: data/{DEFAULT_FILE.name}")
 else:
     st.warning("data/ 폴더에 엑셀이 없습니다. 왼쪽에서 파일을 업로드하세요.")
@@ -73,7 +77,7 @@ scored = annotate(apply_rules(df, ref, params), workplaces, params.weights, name
 ALL_RULES = STAGE2_RULES[:-1] + ["R13", "R15"]
 months = sorted(df["승인월"].unique())
 
-tab_sel, tab_tx = st.tabs(["점검대상 선별", "거래 조회"])
+tab_sel, tab_trend, tab_tx = st.tabs(["점검대상 선별", "기간 분석", "거래 조회"])
 
 # ══ 2단계: 점검대상 선별 ═════════════════════════════════════
 with tab_sel:
@@ -163,6 +167,149 @@ with tab_sel:
         "적중 건수": [int(sel[r].sum()) for r in ALL_RULES],
     })
     st.dataframe(hits, hide_index=True)
+
+# ══ 4단계: 기간 분석 ═════════════════════════════════════════
+# 부서 8개 = 범주형 팔레트 8색, 부서 이름 순서로 고정 배정(필터로 색이 바뀌지 않게)
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+DEPT_COLORS = {d: SERIES[i % len(SERIES)] for i, d in enumerate(sorted(df["예산부서명"].dropna().unique()))}
+BASE_LAYOUT = dict(margin=dict(t=30, b=10, l=10, r=10), yaxis_tickformat=",", hovermode="x unified",
+                   xaxis=dict(showgrid=False), yaxis=dict(gridcolor="rgba(128,128,128,0.2)"))
+
+
+def _months_axis(fig):
+    fig.update_xaxes(type="category", tickangle=0, labelalias={m: f"{m[2:4]}.{m[5:]}" for m in map(str, months)})
+    return fig
+
+
+with tab_trend:
+    st.info("단월 점검에서는 건별로 한도 이내라 드러나지 않는 반복·급증·집중 패턴입니다.  \n※ " + DISCLAIMER
+            + (" (현재: 규칙 기반 템플릿 문장)" if not claude_available() else ""))
+    tp_base = TParams()
+    with st.sidebar.expander("기간 패턴 기준값 설정", expanded=False):
+        tparams = TParams(
+            repeat_months=st.number_input("T-R1 기간(개월)", 1, 12, tp_base.repeat_months),
+            repeat_count=st.number_input("T-R1 반복 건수 기준", 2, 50, tp_base.repeat_count),
+            surge_ratio=st.number_input("T-R2 급증 배수", 1.0, 10.0, tp_base.surge_ratio, step=0.5),
+            month_end_share=st.slider("T-R3 월말 5영업일 비중", 0.1, 0.9, tp_base.month_end_share, 0.05),
+            dept_ratio=st.number_input("T-R3 부서 월평균 배수", 1.0, 5.0, tp_base.dept_ratio, step=0.1),
+            fixed_months=st.number_input("T-R4 연속 개월 수", 2, 12, tp_base.fixed_months),
+        )
+
+    d = prepare(df)
+    c1, c2 = st.columns([1, 2])
+    end_month = pd.Period(c1.selectbox("기준월", months, index=len(months) - 1, key="trend_end"), "M")
+    span = c2.radio("조회 기간", [3, 6, 12], index=2, horizontal=True, format_func=lambda n: f"최근 {n}개월")
+    period = [m for m in pd.period_range(end=end_month, periods=span, freq="M") if m in set(d["월"])]
+    dp = d[d["월"].isin(period)]
+
+    patterns = detect_all(d, end_month, holidays, tparams)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric(f"조회 기간 ({period[0].strftime('%y.%m')}~{period[-1].strftime('%y.%m')})", f"{len(period)}개월")
+    k2.metric("사용액", f"{dp['전표금액'].sum():,.0f}원")
+    k3.metric("건수", f"{len(dp):,}건")
+    k4.metric("감지된 기간 패턴", f"{len(patterns)}건")
+
+    # ── 추이 ──
+    monthly = dp.groupby("월").agg(금액=("전표금액", "sum"), 건수=("전표금액", "size")).reset_index()
+    monthly["월"] = monthly["월"].astype(str)
+    monthly["3개월 이동평균"] = monthly["금액"].rolling(3, min_periods=1).mean()
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**월별 사용액** (막대) · 3개월 이동평균 (선)")
+        fig = go.Figure()
+        fig.add_bar(x=monthly["월"], y=monthly["금액"], name="월 사용액", marker_color=SERIES[0],
+                    customdata=monthly["건수"], hovertemplate="%{y:,.0f}원 · %{customdata}건<extra></extra>")
+        fig.add_scatter(x=monthly["월"], y=monthly["3개월 이동평균"], name="3개월 이동평균", mode="lines",
+                        line=dict(color="#6b6b6b", width=2), hovertemplate="이동평균 %{y:,.0f}원<extra></extra>")
+        fig.update_layout(height=320, legend=dict(orientation="h", y=1.12), **BASE_LAYOUT)
+        st.plotly_chart(_months_axis(fig), width="stretch")
+    with right:
+        st.markdown("**부서별 월 사용액**")
+        dept_m = dp.groupby(["월", "예산부서명"])["전표금액"].sum().reset_index()
+        dept_m["월"] = dept_m["월"].astype(str)
+        fig = px.line(dept_m, x="월", y="전표금액", color="예산부서명", markers=True,
+                      color_discrete_map=DEPT_COLORS, labels={"전표금액": "", "월": "", "예산부서명": "부서"})
+        fig.update_traces(line=dict(width=2), marker=dict(size=8), hovertemplate="%{y:,.0f}원")
+        fig.update_layout(height=320, legend=dict(orientation="h", y=-0.2, title=None), **BASE_LAYOUT)
+        st.plotly_chart(_months_axis(fig), width="stretch")
+
+    # ── 패턴 목록 ──
+    st.subheader(f"기간 패턴 (T-R1~T-R4, 기준월 {end_month})")
+    if patterns.empty:
+        st.write("기준을 넘는 패턴이 없습니다.")
+    else:
+        st.dataframe(
+            patterns.drop(columns=["_가중"]), hide_index=True, width="stretch",
+            column_config={c: st.column_config.TextColumn(width="large")
+                           for c in ["지표", "AI 해석", "AI 추가 확인사항", "관련 승인번호"]},
+        )
+        for _, pt in patterns.iterrows():
+            with st.expander(f"{pt['No']}. {pt['패턴']} · {pt['대상']}"):
+                st.markdown(f"**AI 해석**  \n{pt['AI 해석']}")
+                st.markdown("**AI 추가 확인사항**  \n" + "\n".join(f"- {x}" for x in pt["AI 추가 확인사항"].split(" / ")))
+                ids = [int(i) for i in pt["관련 승인번호"].split(", ")]
+                user = pt["대상"].split(" (")[0]
+                if pt["패턴"].startswith("T-R2"):
+                    s_ = monthly_by_user(d).loc[user].reindex(pd.period_range(end=end_month, periods=12, freq="M"), fill_value=0)
+                    recent = s_.index >= end_month - (tparams.surge_recent - 1)
+                    fig = go.Figure(go.Bar(x=s_.index.astype(str), y=s_.values,
+                                           marker_color=[SERIES[1] if r else "#9aa0a6" for r in recent],
+                                           hovertemplate="%{y:,.0f}원<extra></extra>"))
+                    fig.update_layout(height=260, title=f"{user} 월별 사용액 (주황 = 최근 {tparams.surge_recent}개월)",
+                                      **BASE_LAYOUT)
+                    st.plotly_chart(_months_axis(fig), width="stretch")
+                else:
+                    x = d[d["승인번호"].isin(ids)].sort_values("승인일시")
+                    if pt["패턴"].startswith(("T-R1", "T-R4")):
+                        x = d[(d["사용자"] == user) & (d["가맹점명"] == pt["관련가맹점"])]
+                        cnt = x.groupby("월").agg(건수=("전표금액", "size"), 금액=("전표금액", "sum"))
+                        cnt = cnt.reindex(pd.period_range(end=end_month, periods=12, freq="M"), fill_value=0)
+                        fig = go.Figure(go.Bar(x=cnt.index.astype(str), y=cnt["건수"], marker_color=SERIES[0],
+                                               customdata=cnt["금액"],
+                                               hovertemplate="%{y}건 · %{customdata:,.0f}원<extra></extra>"))
+                        fig.update_layout(height=260, title=f"{user} · {pt['관련가맹점']} 월별 이용 건수", **BASE_LAYOUT)
+                        st.plotly_chart(_months_axis(fig), width="stretch")
+                    st.dataframe(x[["승인번호", "승인일시", "요일", "사용자", "가맹점명", "G/L 계정명", "전표금액",
+                                    "전표 품목 텍스트"]].sort_values("승인일시"),
+                                 hide_index=True, width="stretch",
+                                 column_config={"승인번호": st.column_config.NumberColumn(format="plain"),
+                                                "전표금액": st.column_config.NumberColumn(format="localized"),
+                                                "승인일시": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm")})
+
+    # ── 공통 집계 ──
+    st.subheader("공통 집계")
+    dims = {"직원(사용자)": "사용자", "부서": "예산부서명", "계정": "G/L 계정명", "업종": "가맹점업종"}
+    dim_label = st.radio("집계 기준", list(dims), horizontal=True, key="agg_dim")
+    agg = aggregate(d, dims[dim_label], period)
+    money = [c for c in agg.columns if "금액" in c or "평균" in c or "합계" in c]
+    st.dataframe(agg, hide_index=True, width="stretch",
+                 column_config={**{c: st.column_config.NumberColumn(format="localized") for c in money},
+                                "전월 대비": st.column_config.NumberColumn(format="percent"),
+                                "전년동월 대비": st.column_config.NumberColumn(format="percent")})
+    st.caption("전년동월 대비는 13개월 이상 데이터가 쌓이면 계산됩니다(현재 12개월).")
+
+    # ── AI 추가 점검항목 추천 ──
+    st.subheader("AI 추천 — 기존 점검기준 외 추가 검토 항목")
+    recs = recommend(d, scored, patterns)
+    st.dataframe(recs, hide_index=True, width="stretch",
+                 column_config={"근거 및 기대효과": st.column_config.TextColumn(width="large")})
+    if claude_available():
+        if st.button("Claude에게 추가 점검항목 추천 받기", key="claude_rec"):
+            summary_text = ("[월별 집계]\n" + monthly.to_string(index=False)
+                            + "\n\n[부서별 집계]\n" + aggregate(d, "예산부서명", period).to_string(index=False)
+                            + "\n\n[감지된 기간 패턴]\n"
+                            + (patterns[["패턴", "대상", "지표"]].to_string(index=False) if not patterns.empty else "없음")
+                            + f"\n\n[{end_month} 선별 결과]\n"
+                            + select_for_month(scored, str(end_month))["걸린 규칙"].value_counts().head(15).to_string())
+            with st.spinner("Claude가 집계표를 검토 중…"):
+                try:
+                    st.session_state["claude_recs"] = claude_recommend(summary_text)
+                except Exception as e:
+                    st.error(f"Claude 호출 실패: {e}")
+        if st.session_state.get("claude_recs"):
+            st.dataframe(pd.DataFrame(st.session_state["claude_recs"]), hide_index=True, width="stretch")
+    else:
+        st.caption("규칙 기반 추천입니다. ANTHROPIC_API_KEY를 설정하면 Claude에게 집계표를 주고 추천을 받을 수 있습니다.")
 
 # ══ 1단계: 거래 조회 ═════════════════════════════════════════
 with tab_tx:

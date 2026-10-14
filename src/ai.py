@@ -257,3 +257,34 @@ def claude_comment(row, workplace: str | None = None) -> dict:
     if response.stop_reason == "refusal" or response.parsed_output is None:
         raise RuntimeError("Claude가 응답을 생성하지 못했습니다.")
     return response.parsed_output.model_dump()
+
+
+def claude_recommend(summary_text: str) -> list[dict]:
+    """월별 집계표(숫자 요약)를 주고 기존 규칙에 없는 추가 점검항목 3~5개를 받는다."""
+    import anthropic
+    from pydantic import BaseModel
+
+    class Item(BaseModel):
+        추천_점검항목: str
+        근거_및_기대효과: str
+
+    class Recs(BaseModel):
+        items: list[Item]
+
+    client = anthropic.Anthropic()
+    response = client.beta.messages.parse(
+        model=MODEL,
+        max_tokens=4000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        output_config={"effort": "medium"},
+        system=SYSTEM,
+        messages=[{"role": "user", "content": (
+            "아래는 법인카드 사용 월별 집계와 현재 점검규칙(R01~R17, T-R1~T-R4)으로 찾은 결과 요약입니다. "
+            "기존 규칙에 없는데 감사부가 추가로 확인할 만한 패턴이나 점검항목을 3~5개 제안해 주세요. "
+            "각 항목은 근거가 된 숫자와 기대효과를 한두 문장으로 씁니다.\n\n" + summary_text)}],
+        output_format=Recs,
+    )
+    if response.stop_reason == "refusal" or response.parsed_output is None:
+        raise RuntimeError("Claude가 응답을 생성하지 못했습니다.")
+    return [i.model_dump() for i in response.parsed_output.items]
