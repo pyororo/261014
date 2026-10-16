@@ -8,7 +8,7 @@ h = h.replace(/^<!doctype html>\s*<html[^>]*>\s*<head>\s*/i, '');
 h = h.replace(/<meta charset="utf-8">\s*<meta name="viewport"[^>]*>\s*/, '');
 h = h.replace(/<!-- 외부 통신 전면 차단[^>]*-->\s*<meta http-equiv="Content-Security-Policy"[^>]*>\s*/, '');
 must(!/Content-Security-Policy/.test(h), 'csp');
-h = h.replace('<title>법인카드 점검 도구</title>', '<title>법인카드 점검 PoC</title>');
+// 아티팩트 이름은 HTML 제목과 같음
 h = h.replace(/<\/head>\s*<body class="is-empty">/, '<script>document.body.classList.add("is-empty")</script>');
 must(!/<\/head>|<body/.test(h.slice(0, 60000)), 'body');
 h = h.replace(/<\/body>\s*<\/html>\s*$/, '');
