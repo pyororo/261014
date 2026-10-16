@@ -185,16 +185,34 @@
     if (!R) return;
     const cnt = {};
     R.list.forEach((r) => { r.hits.forEach((h) => (cnt[h] = (cnt[h] || 0) + 1)); r.tHits.forEach((h) => (cnt[h] = (cnt[h] || 0) + 1)); });
-    const row = (id, name, weight, kind) => `<li class="rule${S.ruleFocus === id ? " focus" : ""}" id="rule-${esc(id)}">
-      <div class="rh"><b class="mono">${esc(id)}</b> <span>${esc(name)}</span>${weight !== null ? `<span class="w">가중치 ${weight}</span>` : ""}</div>
-      ${ENGINE.RULE_HELP[id] ? `<div class="rhelp">${esc(ENGINE.RULE_HELP[id])}</div>` : ""}<div class="rd">${(S.params.off || []).includes(id) ? '<span class="ng-txt">사용 안 함</span> · ' : ""}${esc(ruleDesc(id))}</div>
-      <button type="button" class="rf" data-filter="${esc(id)}" ${cnt[id] ? "" : "disabled"}>${S.month} 선별 중 ${fmt(cnt[id] || 0)}건${cnt[id] ? (S.ruleFilter === id ? " · 보는 중" : " · 이 규칙 건만 보기") : ""}</button></li>`;
-    const sec = (title, items) => items.length ? `<h3>${title}</h3><ul>${items.join("")}</ul>` : "";
-    $("#ruleBody").innerHTML =
-      `<p class="muted">위험점수 = 걸린 규칙 가중치 합 · 6점 이상 <span class="g g-상">상</span> 3~5점 <span class="g g-중">중</span> 1~2점 <span class="g g-하">하</span> · 금지 업종은 무조건 상 · 휴일·심야만 걸리고 적요에 사전승인 문서번호가 있으면 규칙당 1점 감점</p>` +
-      sec("단건·다건 규칙", ENGINE.RULE_IDS.map((id) => row(id, ENGINE.RULE_NAMES[id], S.weights[id] ?? 0))) +
-      sec(`추가조건 <small>${S.customRows ? "규칙 수정 화면에서 고친 조건" : "기준표 '추가조건' 시트"}</small>`, R.custom.rules.map((c) => row(c.id, c.name, S.weights[c.id] ?? c.weight))) +
-      sec("기간 규칙 <small>점수 없이 표시만</small>", Object.keys(ENGINE.T_NAMES).map((id) => row(id, ENGINE.T_NAMES[id], null)));
+    const off = new Set(S.params.off || []);
+    // 가중치 1~5점은 점 5개, 그 밖(0점·6점 이상)은 숫자로 표시
+    const dots = (w) => w >= 1 && w <= 5 && Number.isInteger(w) ? `<span class="dots" title="가중치 ${w}점" aria-label="가중치 ${w}점">${[1, 2, 3, 4, 5].map((k) => `<i class="${k <= w ? "on" : ""}"></i>`).join("")}</span>` : `<span class="wnum${w > 5 ? " big" : ""}" title="가중치 ${w}점">${fmt(w)}점</span>`;
+    const more = (id, n) => `<div class="rr-more"><div class="rr-crit"><span>판단 기준</span>${esc(ruleDesc(id))}</div>${n ? `<button type="button" class="rf" data-filter="${esc(id)}">${S.ruleFilter === id ? "목록 필터 해제" : `이 규칙 ${fmt(n)}건만 목록에서 보기`}</button>` : ""}</div>`;
+    const row = (id, name, weight, showW) => {
+      const n = cnt[id] || 0, open = S.ruleFocus === id;
+      return `<li class="rr${open ? " open" : ""}${n ? "" : " zero"}${off.has(id) ? " off" : ""}" id="rule-${esc(id)}">
+        <button type="button" class="rr-top" data-toggle="${esc(id)}" aria-expanded="${open}">
+          <b class="rr-id">${esc(id)}</b>
+          <span class="rr-nm"><span class="rr-name">${esc(name)}${off.has(id) ? ' <em class="rr-off">사용 안 함</em>' : ""}</span><span class="rr-help">${esc(ENGINE.RULE_HELP[id] || "")}</span></span>
+          ${showW ? (weight !== null ? dots(weight) : '<span class="rr-tag">표시만</span>') : ""}
+          <span class="rr-n${n ? " hit" : ""}">${n ? fmt(n) + "건" : "–"}</span>
+        </button>${open ? more(id, n) : ""}</li>`;
+    };
+    const scale = `<div class="scale" aria-label="등급 기준"><span class="sc sc-하"><b>하</b>1~2점</span><span class="sc sc-중"><b>중</b>3~5점</span><span class="sc sc-상"><b>상</b>6점 이상</span></div>
+      <ul class="scale-note"><li><b>위험점수</b> = 걸린 규칙 가중치의 합</li><li><b>금지 업종</b>은 점수와 관계없이 바로 <b>상</b></li><li><b>사전승인 감점</b>: 휴일·심야만 걸리고 적요에 사전승인 문서번호가 있으면 규칙당 1점 감점</li></ul>`;
+
+    const ids = ENGINE.RULE_IDS, hitN = ids.filter((id) => cnt[id]).length;
+    const only = !!S.ruleOnlyHit, keep = (id) => !only || cnt[id] || S.ruleFocus === id;
+    const wOf = (id) => S.weights[id] ?? 0;
+    const groups = [...new Set(ids.map(wOf))].sort((a, b) => b - a).map((w) => [w, ids.filter((id) => wOf(id) === w && keep(id))]).filter(([, g]) => g.length);
+    const sum = `<div class="rsum"><div><b>${fmt(hitN)}</b><span>/ ${fmt(ids.length)}개 규칙이 ${esc(S.month)}에 걸림</span></div>
+      <div class="seg2" role="group" aria-label="보기"><button type="button" data-only="0" aria-pressed="${!only}">전체 규칙</button><button type="button" data-only="1" aria-pressed="${only}">걸린 규칙만</button></div></div>`;
+    const grp = (w, g) => `<section class="wgrp w${w}"><h3>${dots(w)}<span>${w === 0 ? "가중치 0점 · 점수에 안 들어감" : `가중치 ${fmt(w)}점`}</span><small>${g.length}개</small></h3><ul>${g.map((id) => row(id, ENGINE.RULE_NAMES[id], w, false)).join("")}</ul></section>`;
+    const cus = R.custom.rules.filter((c) => keep(c.id)), per = Object.keys(ENGINE.T_NAMES).filter(keep);
+    $("#ruleBody").innerHTML = sum + scale + groups.map(([w, g]) => grp(w, g)).join("") +
+      (cus.length ? `<section class="wgrp"><h3><span>추가조건</span><small>${S.customRows ? "규칙 수정 화면에서 고친 조건" : "기준표 시트"}</small></h3><ul>${cus.map((c) => row(c.id, c.name, S.weights[c.id] ?? c.weight, true)).join("")}</ul></section>` : "") +
+      (per.length ? `<section class="wgrp"><h3><span>기간 규칙</span><small>점수 없이 표시만</small></h3><ul>${per.map((id) => row(id, ENGINE.T_NAMES[id], null, false)).join("")}</ul></section>` : "");
     if (S.ruleFocus) document.getElementById("rule-" + S.ruleFocus)?.scrollIntoView({ block: "nearest" });
   }
   function openRules(id) {
@@ -212,6 +230,8 @@
   $("#ruleClose").addEventListener("click", closeRules);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#ruleDrawer").hidden) closeRules(); });
   $("#ruleBody").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-toggle]"); if (t) { S.ruleFocus = S.ruleFocus === t.dataset.toggle ? null : t.dataset.toggle; renderRuleDrawer(); return; }
+    const o = e.target.closest("[data-only]"); if (o) { S.ruleOnlyHit = o.dataset.only === "1"; renderRuleDrawer(); return; }
     const b = e.target.closest("[data-filter]"); if (!b) return;
     S.ruleFilter = S.ruleFilter === b.dataset.filter ? null : b.dataset.filter; S.grade = "전체"; S.tab = "list";
     renderTabs(); renderList(); renderRuleDrawer();
