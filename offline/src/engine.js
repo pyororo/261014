@@ -367,7 +367,7 @@ const ENGINE = (() => {
   function reasonSentence(r) {
     const p = phrases(r);
     if (!p.length) return "";
-    let s = `${r.emp || "-"}${r.writer ? `(${r.writer})` : ""}의 ${r.merchant}(${r.industry}) ${won(r.amount)} 결제: ${p.join(", ")}.`;
+    let s = `${r.emp || "부서공용"}${r.writer ? `(${r.writer})` : ""}의 ${r.merchant}(${r.industry}) ${won(r.amount)} 결제: ${p.join(", ")}.`;
     if (r.adjustReason) s += ` 다만 ${r.adjustReason}.`;
     return s;
   }

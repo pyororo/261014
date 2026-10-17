@@ -3,8 +3,8 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const won = ENGINE.won;
-  // 직원명은 카드 주인, 참조는 전표 작성자 → '권윤슬(20016/권윤슬)', 직원명 공란이면 '-(20012/류단비)'
-  const who = (r) => `${r.emp || "-"}${r.writer ? `(${r.writer})` : ""}`;
+  // 직원명은 카드 주인, 참조는 전표 작성자 → '권윤슬(20016/권윤슬)', 직원명 공란이면 '부서공용(20012/류단비)'
+  const who = (r) => `${r.emp || "부서공용"}${r.writer ? `(${r.writer})` : ""}`;
   const fmt = (n) => Math.round(n).toLocaleString("ko-KR");
   // 천 단위 쉼표: 소수는 그대로 두고 정수부만 끊음 (0.5 → 0.5, 300000 → 300,000)
   const fmt2 = (n) => Number(n).toLocaleString("ko-KR", { maximumFractionDigits: 4 });
@@ -263,7 +263,7 @@
         <td><span class="g g-${r.grade}">${r.grade}</span></td><td class="n">${r.score}${r.adjust ? `<div class="muted" title="사전승인 기재로 조정">${r.ruleScore}→${r.score}</div>` : ""}</td>
         <td><div class="chips">${ruleChips(r)}</div></td>
         <td class="when"><span class="mono">${r.dkey.slice(5)}</span>(${m("day", r.holName || r.wdName)}) <span class="mono">${m("time", r.time)}</span>${r.hits.has("R17") ? `<div class="muted">${m("day", "휴가 중")}</div>` : ""}${r.hits.has("R15") ? `<div class="muted">${m("settle", `정산 ${Math.round((r.acctDate - r.date) / 86400000)}일`)}</div>` : ""}</td>
-        <td style="white-space:nowrap">${m("who", r.emp ? esc(who(r)) : `<span class="ng-txt">-</span>${r.writer ? esc(`(${r.writer})`) : ""}`)}<div class="muted">${esc(r.dept)}</div></td>
+        <td style="white-space:nowrap">${m("who", r.emp ? esc(who(r)) : `<span class="ng-txt">부서공용</span>${r.writer ? esc(`(${r.writer})`) : ""}`)}<div class="muted">${esc(r.dept)}</div></td>
         <td class="mer">${m("mer", esc(r.merchant))}${r.overseas ? ` <span class="muted">(${esc(r.currency || "해외")})</span>` : ""}<div class="muted">${m("ind", esc(r.industry))} · ${m("gl", esc(r.glName))}</div>
           <div class="memo-line"><span class="lbl">적요</span><span>${m("memo", r.memo ? esc(r.memo) : '<span class="ng-txt">적요 공란</span>')}</span></div>${m.has("title") ? `<div class="memo-line"><span class="lbl">제목</span><span>${m("title", esc(r.title))}</span></div>` : ""}</td>
         <td class="n">${m("amt", fmt(r.amount))}${r.limit && (r.hits.has("R05") || r.hits.has("R04")) ? `<div class="muted">한도 ${fmt(r.limit)}</div>` : ""}</td>
@@ -843,7 +843,7 @@
     $("#mmClose").focus();
   }
   function renderMail() {
-    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(`${g.emp || "-"}(${[...new Set(g.items.map((r) => r.writer).filter(Boolean))].join(", ") || "참조 없음"})`)}</span><small>${esc(g.dept)}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
+    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(`${g.emp || "부서공용"}(${[...new Set(g.items.map((r) => r.writer).filter(Boolean))].join(", ") || "참조 없음"})`)}</span><small>${esc(g.dept)}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
     const g = M.groups[M.sel], e = M.edits[g.key] || {};
     $("#mmSubj").value = e.subj ?? mailSubject(g);
     $("#mmBody").innerHTML = e.body ?? mailBody(g);
