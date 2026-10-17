@@ -780,12 +780,37 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per.length ? per : [{ 패턴: "해당 없음" }]), "기간패턴");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(R.recs.map((r) => ({ 추천항목: r.title, 근거: r.basis, 이유: r.why, 규칙안: r.rule }))), "추가점검항목");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(appliedRows()), "적용기준");
-    saveFile(wb, `card-audit_result_${S.month}.xlsx`);
+    const rows = exportRows(), heads = Object.keys(rows[0] || {});
+    const ci = heads.indexOf("소명결과");
+    saveFile(wb, `card-audit_result_${S.month}.xlsx`, ci < 0 ? null : (u8) => addListValidation(u8, 0, XLSX.utils.encode_col(ci), rows.length + 1, SM_RESULTS, "소명요청 건의 회신 결과를 고르세요: 소명 인정 / 부적정 전환 / 미회신"));
     flash("#xlsxBtn", "저장했습니다");
   });
-  function saveFile(wb, name) {
+  // 소명 관리 열: 결과 엑셀에 빈칸으로 만들어 두고, 다시 불러오면 적은 내용을 되살림
+  const SM_COLS = ["소명요청일", "회신기한", "회신일", "소명결과", "소명 요지", "증빙번호"];
+  const SM_RESULTS = ["소명 인정", "부적정 전환", "미회신"];
+  // SheetJS 무료판은 데이터 유효성 검사를 쓰지 못하므로, 저장된 xlsx(zip) 안의 시트 XML에 목록 검사를 직접 넣는다
+  function addListValidation(u8, sheetIdx, col, lastRow, items, prompt) {
+    const zip = XLSX.CFB.read(new Uint8Array(u8), { type: "array" });
+    const ent = XLSX.CFB.find(zip, `/xl/worksheets/sheet${sheetIdx + 1}.xml`);
+    if (!ent) return u8;
+    let xml = new TextDecoder().decode(ent.content);
+    const dv = `<dataValidations count="1"><dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" errorStyle="warning" promptTitle="소명결과" prompt="${prompt}" errorTitle="소명결과" error="${items.join(", ")} 중에서 고르세요." sqref="${col}2:${col}${Math.max(lastRow, 2)}"><formula1>"${items.join(",")}"</formula1></dataValidation></dataValidations>`;
+    // 스키마 순서상 sheetData·mergeCells보다 뒤, hyperlinks·pageMargins·ignoredErrors 등보다 앞에 와야 엑셀이 '복구' 경고 없이 연다
+    const at = xml.search(/<(hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s>/]/);
+    xml = at >= 0 ? xml.slice(0, at) + dv + xml.slice(at) : xml.replace("</worksheet>", dv + "</worksheet>");
+    ent.content = new TextEncoder().encode(xml); ent.size = ent.content.length;
+    return XLSX.CFB.write(zip, { fileType: "zip", type: "array" });
+  }
+  function saveFile(wb, name, post) {
     // 파일(file://)로 연 페이지에서는 blob 주소와 한글 파일명이 무시될 수 있어 data 주소 + 영문 파일명으로 저장
-    const b64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
+    let b64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
+    if (post) {
+      try {
+        const u8 = new Uint8Array(post(XLSX.write(wb, { bookType: "xlsx", type: "array" })));
+        let bin = ""; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+        b64 = btoa(bin);
+      } catch (e) { console.error("유효성 검사 추가 실패, 목록 없이 저장", e); }
+    }
     const a = document.createElement("a"); a.href = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + b64; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
   }
@@ -796,6 +821,7 @@
       "걸린 규칙": [...r.hits].sort().map((h) => `${h} ${ENGINE.ruleName(h)}`).concat([...r.tHits].map((h) => `${h} ${ENGINE.T_NAMES[h]}`)).join(" / "),
       위험점수: r.score, 등급: r.grade, "선별 사유": r.reason, 추가확인사항: r.checks.join("; "),
       검토결과: S.reviews[r.no]?.result || "", 검토의견: S.reviews[r.no]?.opinion || "",
+      ...Object.fromEntries(SM_COLS.map((c) => [c, S.reviews[r.no]?.sm?.[c] ?? ""])),
     }));
   }
 
@@ -830,7 +856,12 @@
         // 이전에 저장한 결과 엑셀이면 검토결과·의견을 되살림
         const prev = wb.SheetNames.includes("점검대상목록") ? read("점검대상목록") : [];
         let restored = 0;
-        for (const p of prev) { const k = String(p["승인번호"] ?? "").trim(); if (k && (p["검토결과"] || p["검토의견"])) { S.reviews[k] = { result: p["검토결과"] || "", opinion: p["검토의견"] || "" }; restored++; } }
+        const smVal = (v) => (v instanceof Date ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}` : String(v ?? "").trim());
+        for (const p of prev) {
+          const k = String(p["승인번호"] ?? "").trim();
+          const sm = Object.fromEntries(SM_COLS.map((c) => [c, smVal(p[c])]).filter(([, v]) => v));
+          if (k && (p["검토결과"] || p["검토의견"] || Object.keys(sm).length)) { S.reviews[k] = { result: p["검토결과"] || "", opinion: p["검토의견"] || "", ...(Object.keys(sm).length ? { sm } : {}) }; restored++; }
+        }
         if (restored) store.set("cc_reviews", S.reviews);
         S.files.push(f.name);
       } catch (err) {
