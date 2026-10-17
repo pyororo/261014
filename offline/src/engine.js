@@ -57,6 +57,7 @@ const ENGINE = (() => {
   const DERIVED = {
     요일: (r) => r.wdName, 승인시: (r) => r.hour, 휴일: (r) => (r.holiday ? "Y" : "N"), 승인월: (r) => r.month,
     공휴일명: (r) => r.holName, 시도: (r) => sido(r.addr), 제한구분: (r) => r.restrict,
+    한도대비율: (r) => (r.limit ? Math.round((r.amount / r.limit) * 100) : ""), 월말영업일: (r) => (r.lastBiz ? "Y" : "N"),
   };
   let CUSTOM = new Map();
   const ruleName = (id) => RULE_NAMES[id] || CUSTOM.get(id)?.name || id;
@@ -229,6 +230,9 @@ const ENGINE = (() => {
       c.excluded = true;
     }
     for (const p of used) p.excluded = true;
+    // 월 마지막 영업일 표시 (추가조건의 '월말영업일' 계산 컬럼)
+    const lastBiz = new Set([...new Set(rows.map((r) => r.month))].map((m) => businessDays(m, ref).slice(-1)[0]));
+    for (const r of rows) r.lastBiz = lastBiz.has(r.dkey);
     return { rows, stats: { dup, cancels: matched + unmatched, matched, unmatched } };
   }
 
@@ -527,6 +531,7 @@ const ENGINE = (() => {
     recs.push({
       title: "건당 한도 90~100% 구간 결제 집중", basis: `최근 3개월 ${nf(near.length)}건이 계정 한도의 90~100% 구간` + (nearBy.length ? `, 최다 ${nearBy[0][0]} ${nf(nearBy[0][1].length)}건` : ""),
       why: "한도를 의식한 금액 조정(분할결제의 변형) 가능성. R05는 초과분만 잡음", rule: "직원별 3개월 내 한도 90% 이상 결제 3건 이상", count: near.length,
+      conds: [{ col: "한도대비율", op: "이상", val: "90" }, { col: "한도대비율", op: "이하", val: "100" }],
     });
     // 2) 같은 날 같은 가맹점 다른 카드 결제 (카드 분산)
     const multi = [...groupBy(recent, (r) => `${r.merchant}|${r.dkey}`).values()].filter((g) => new Set(g.map((r) => r.card)).size >= 2);
@@ -546,6 +551,7 @@ const ENGINE = (() => {
     recs.push({
       title: "금요일 저녁 접대비 비중", basis: `최근 3개월 접대비 ${nf(ent.length)}건 중 금요일 18시 이후 ${nf(fri.length)}건(${ent.length ? Math.round((fri.length / ent.length) * 100) : 0}%)`,
       why: "주말 직전 사적 모임을 접대비로 처리하는 경우가 많은 시간대", rule: "직원별 접대비 중 금요일 저녁 비중 50% 이상", count: fri.length,
+      conds: [{ col: "G/L 계정명", op: "포함", val: "접대비" }, { col: "요일", op: "같음", val: "금" }, { col: "승인시", op: "이상", val: "18" }],
     });
     // 5) 월말 마지막 영업일 접대비 정액
     const lastDays = new Set(win3.map((m) => businessDays(m, ref).slice(-1)[0]));
@@ -553,6 +559,7 @@ const ENGINE = (() => {
     recs.push({
       title: "월 마지막 영업일 접대비 결제", basis: `최근 3개월 마지막 영업일 접대비 ${nf(endEnt.length)}건, ${won(sum(endEnt))}`,
       why: "잔여 예산 소진·선결제 목적의 월말 결제 의심. T-R3은 부서·분기말만 봄", rule: "직원별 월 마지막 영업일 접대비 2개월 이상", count: endEnt.length,
+      conds: [{ col: "G/L 계정명", op: "포함", val: "접대비" }, { col: "월말영업일", op: "같음", val: "Y" }],
     });
     return recs.sort((a, b) => b.count - a.count);
   }

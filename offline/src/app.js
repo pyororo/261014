@@ -375,11 +375,31 @@
   function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x))); const f = x / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
 
   function renderRecs() {
-    const base = R.recs.map((r, i) => `<div class="rec"><h3>${esc(r.title)}</h3><div class="basis">${esc(r.basis)}</div><div class="why">${esc(r.why)}</div><div class="how">규칙안: ${esc(r.rule)}</div><button class="btn rec-copy" type="button" data-rec="${i}" id="recCopy${i}">규칙 요청 문구 복사</button></div>`).join("");
-    $("#recs").innerHTML = base;
+    // 거래 한 건씩 판단할 수 있는 추천(conds 있음)은 추가조건으로 바로 넣고, 여러 건을 묶어 봐야 하는 추천은 요청 문구만 복사
+    const card = (r, i) => {
+      const have = r.conds && R.custom.rules.find((c) => c.name === r.title);
+      const btn = !r.conds ? `<button class="btn rec-copy" type="button" data-rec="${i}" id="recCopy${i}">규칙 요청 문구 복사</button>`
+        : have ? `<span class="rec-have">추가 점검 규칙 ${esc(have.id)}로 적용 중</span>`
+        : `<button class="btn primary rec-add" type="button" data-recadd="${i}">+ 추가 점검 규칙으로 추가</button>`;
+      return `<div class="rec"><h3>${esc(r.title)}</h3><div class="basis">${esc(r.basis)}</div><div class="why">${esc(r.why)}</div><div class="how">규칙안: ${esc(r.rule)}</div>${r.conds ? `<div class="how">추가조건: ${r.conds.map((x) => esc(`${x.col} ${x.op} ${x.val}`)).join(" 그리고 ")}</div>` : ""}${btn}</div>`;
+    };
+    const idx = R.recs.map((r, i) => [r, i]);
+    const can = idx.filter(([r]) => r.conds), cannot = idx.filter(([r]) => !r.conds);
+    $("#recs").innerHTML = `<h3 class="rec-group">바로 추가 점검 규칙으로 적용할 수 있는 항목 <small>${fmt(can.length)}개 · 거래 한 건씩 판단</small></h3><div class="recs">${can.map(([r, i]) => card(r, i)).join("")}</div>`
+      + `<h3 class="rec-group">새 규칙 개발이 필요한 항목 <small>${fmt(cannot.length)}개 · 여러 건을 묶어 판단, 문구를 복사해 요청</small></h3><div class="recs">${cannot.map(([r, i]) => card(r, i)).join("")}</div>`;
   }
   // 새 규칙을 요청할 때 붙여 넣을 문구: 근거(실제 이름·건수·금액·적요 예시)는 빼고 제목·이유·규칙안만 복사
   $("#recs").addEventListener("click", async (e) => {
+    const a = e.target.closest("[data-recadd]");
+    if (a) {
+      // 규칙 수정 화면의 추가조건 탭을 열고 새 조건을 채워 둠 → 미리보기 건수를 보고 [적용]
+      const r = R.recs[Number(a.dataset.recadd)];
+      openEditor("U");
+      const id = "U" + String(Math.max(0, ...D.custom.map((c) => +c.id.slice(1) || 0)) + 1).padStart(2, "0");
+      D.custom.push({ id, name: r.title, weight: 2, conds: r.conds.map((x) => ({ ...x })) }); D.weights[id] = 2;
+      renderEditor(); simulate();
+      return;
+    }
     const b = e.target.closest("[data-rec]"); if (!b) return;
     const r = R.recs[Number(b.dataset.rec)];
     const text = `[추가 점검 규칙 요청]\n항목: ${r.title}\n이유: ${r.why}\n규칙안: ${r.rule}`;
