@@ -808,8 +808,8 @@
     const th = `style="${F}background:#e2edf0;color:#1d5a6e;font-weight:bold;text-align:left;padding:6px 8px;border:1px solid #b9c4c0"`;
     const td = (x = "") => `style="${F}padding:6px 8px;border:1px solid #b9c4c0;vertical-align:top;${x}"`;
     const p = `style="${F}margin:0 0 12px;line-height:1.6"`;
-    // 선별 사유·확인 요청 사항은 항목마다 줄을 나누고 '- '를 붙임
-    const items = (xs) => xs.map((x) => `- ${esc(x)}`).join("<br>");
+    // 선별 사유·확인 요청 사항은 항목마다 줄을 나누고 '• '를 붙임
+    const items = (xs) => xs.map((x) => `• ${esc(x)}`).join("<br>");
     const rows = g.items.map((r, i) => `<tr><td ${td("text-align:center")}>${i + 1}</td><td ${td("white-space:nowrap")}>${r.dkey} ${r.time.slice(0, 5)}</td><td ${td()}>${esc(who(r))}</td><td ${td()}>${esc(r.merchant)}</td><td ${td("text-align:right;white-space:nowrap")}>${fmt(r.amount)}</td><td ${td()}>${esc(r.glName)}</td><td ${td()}>${r.memo ? esc(r.memo) : "(공란)"}</td><td ${td("min-width:130px")}>${items(ENGINE.reasonParts(r))}</td><td ${td("min-width:130px")}>${items(r.checks)}</td><td ${td("min-width:60px")}></td></tr>`).join("");
     return `<p ${p}>안녕하세요,<br>감사부 ${sender}입니다.</p>`
       + `<p ${p}>${monthKo()} 법인카드 사용 적정성 점검 결과, 아래 ${g.items.length}건의 사용 내역에 대해 확인이 필요하여 소명을 요청드립니다.</p>`
