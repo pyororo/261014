@@ -783,24 +783,84 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(R.recs.map((r) => ({ 추천항목: r.title, 근거: r.basis, 이유: r.why, 규칙안: r.rule }))), "추가점검항목");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(appliedRows()), "적용기준");
     const ci = Object.keys(rows[0] || {}).indexOf("소명결과");
-    saveFile(wb, `card-audit_result_${S.month}.xlsx`, ci < 0 ? null : (u8) => addListValidation(u8, 1, XLSX.utils.encode_col(ci), rows.length + 1, SM_RESULTS, "소명요청 건의 회신 결과를 고르세요: 소명 인정 / 부적정 전환 / 미회신"));
+    saveFile(wb, `card-audit_result_${S.month}.xlsx`, (zip) => { styleSummary(zip, 0); if (ci >= 0) addListValidation(zip, 1, XLSX.utils.encode_col(ci), rows.length + 1, SM_RESULTS, "소명요청 건의 회신 결과를 고르세요: 소명 인정 / 부적정 전환 / 미회신"); });
     flash("#xlsxBtn", "저장했습니다");
   });
   // 소명 관리 열: 결과 엑셀에 빈칸으로 만들어 두고, 다시 불러오면 적은 내용을 되살림
   const SM_COLS = ["소명요청일", "회신기한", "회신일", "소명결과", "소명 요지", "증빙번호"];
   const SM_RESULTS = ["소명 인정", "부적정 전환", "미회신"];
   // SheetJS 무료판은 데이터 유효성 검사를 쓰지 못하므로, 저장된 xlsx(zip) 안의 시트 XML에 목록 검사를 직접 넣는다
-  function addListValidation(u8, sheetIdx, col, lastRow, items, prompt) {
-    const zip = XLSX.CFB.read(new Uint8Array(u8), { type: "array" });
+  function addListValidation(zip, sheetIdx, col, lastRow, items, prompt) {
     const ent = XLSX.CFB.find(zip, `/xl/worksheets/sheet${sheetIdx + 1}.xml`);
-    if (!ent) return u8;
+    if (!ent) return;
     let xml = new TextDecoder().decode(ent.content);
     const dv = `<dataValidations count="1"><dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" errorStyle="warning" promptTitle="소명결과" prompt="${prompt}" errorTitle="소명결과" error="${items.join(", ")} 중에서 고르세요." sqref="${col}2:${col}${Math.max(lastRow, 2)}"><formula1>"${items.join(",")}"</formula1></dataValidation></dataValidations>`;
     // 스키마 순서상 sheetData·mergeCells보다 뒤, hyperlinks·pageMargins·ignoredErrors 등보다 앞에 와야 엑셀이 '복구' 경고 없이 연다
     const at = xml.search(/<(hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s>/]/);
     xml = at >= 0 ? xml.slice(0, at) + dv + xml.slice(at) : xml.replace("</worksheet>", dv + "</worksheet>");
-    ent.content = new TextEncoder().encode(xml); ent.size = ent.content.length;
-    return XLSX.CFB.write(zip, { fileType: "zip", type: "array" });
+    setXml(ent, xml);
+  }
+  const getXml = (ent) => new TextDecoder().decode(ent.content);
+  const setXml = (ent, xml) => { ent.content = new TextEncoder().encode(xml); ent.size = ent.content.length; };
+  // 요약 시트 서식: SheetJS 무료판은 글꼴·색·테두리를 저장하지 못하므로 styles.xml에 서식을 덧붙이고 셀에 번호(s)를 단다
+  let SUMMARY_KINDS = [];
+  const C = { ink: "1C2320", sub: "6B7570", accent: "1D5A6E", headBg: "E2EDF0", headLine: "B9CDD3", line: "E3E6E1", ng: "B3261E", wa: "9A5B00", ok: "2F6B3A", mu: "8A948F",
+    rv: { 적정: ["EEF6EF", "2F6B3A"], 소명요청: ["EAF2F5", "1D5A6E"], 부적정: ["FBECEB", "B3261E"], 미검토: ["FFFFFF", "4E5A55"] } };
+  function summaryStyle(kind, col, tag) {
+    const num = col > 0, rv = kind.startsWith("rv-") ? C.rv[kind.slice(3)] : null;
+    const font = { sz: 10, color: C.ink, b: false };
+    let fill = null, border = {}, h = num ? "right" : "left", fmt = tag === "pct" ? "pct" : num ? "num" : null;
+    if (kind === "title") Object.assign(font, { sz: 15, b: true });
+    else if (kind === "sub" || kind === "note") Object.assign(font, { sz: 9, color: C.sub });
+    else if (kind === "sec") Object.assign(font, { sz: 11.5, b: true, color: C.accent });
+    else if (kind === "head") { Object.assign(font, { b: true, color: C.accent }); fill = C.headBg; border = { bottom: ["thin", C.headLine] }; fmt = null; }
+    else if (kind === "total") { font.b = true; border = { top: ["medium", C.ink] }; }
+    else { border = { bottom: ["thin", C.line] }; if (rv) { fill = rv[0]; if (!num) Object.assign(font, { b: true, color: rv[1] }); } }
+    if (kind === "body" || rv) {
+      if (tag === "fl") Object.assign(font, { b: true, color: C.accent });
+      else if (tag === "ng") Object.assign(font, { b: true, color: C.ng });
+      else if (tag === "wa") Object.assign(font, { b: true, color: C.wa });
+      else if (tag === "mu") font.color = C.mu;
+    }
+    if (kind === "title" || kind === "sub" || kind === "note" || kind === "sec") h = "left";
+    return { font, fill, border, h, fmt };
+  }
+  function styleSummary(zip, sheetIdx) {
+    const st = XLSX.CFB.find(zip, "/xl/styles.xml"), sh = XLSX.CFB.find(zip, `/xl/worksheets/sheet${sheetIdx + 1}.xml`);
+    if (!st || !sh) return;
+    let css = getXml(st), xml = getXml(sh);
+    const count = (tag, re) => ((css.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [, ""])[1].match(re) || []).length;
+    const base = { font: count("fonts", /<font[ >/]/g), fill: count("fills", /<fill[ >/]/g), border: count("borders", /<border[ >/]/g), xf: count("cellXfs", /<xf /g) };
+    const fonts = [], fills = [], borders = [], xfs = [], memo = {};
+    const idx = (arr, x) => { const k = arr.indexOf(x); return k >= 0 ? k : arr.push(x) - 1; };
+    const NUM = { num: 200, pct: 201 };
+    const xfOf = (s) => {
+      const key = JSON.stringify(s);
+      if (key in memo) return memo[key];
+      const f = base.font + idx(fonts, `<font>${s.font.b ? "<b/>" : ""}<sz val="${s.font.sz}"/><color rgb="FF${s.font.color}"/><name val="맑은 고딕"/><family val="3"/><charset val="129"/></font>`);
+      const fi = s.fill ? base.fill + idx(fills, `<fill><patternFill patternType="solid"><fgColor rgb="FF${s.fill}"/><bgColor indexed="64"/></patternFill></fill>`) : 0;
+      const side = (n) => (s.border[n] ? `<${n} style="${s.border[n][0]}"><color rgb="FF${s.border[n][1]}"/></${n}>` : `<${n}/>`);
+      const bo = Object.keys(s.border).length ? base.border + idx(borders, `<border>${side("left")}${side("right")}${side("top")}${side("bottom")}<diagonal/></border>`) : 0;
+      const nf = s.fmt ? NUM[s.fmt] : 0;
+      return (memo[key] = base.xf + idx(xfs, `<xf numFmtId="${nf}" fontId="${f}" fillId="${fi}" borderId="${bo}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="${s.h}" vertical="center"/></xf>`));
+    };
+    // 셀마다 서식 번호를 붙임
+    xml = xml.replace(/<c r="([A-Z]+)(\d+)"( s="\d+")?/g, (m, c, r, sOld) => {
+      const [kind, tags] = SUMMARY_KINDS[r - 1] || ["body", []];
+      if (kind === "blank") return m;
+      const col = XLSX.utils.decode_col(c);
+      return `<c r="${c}${r}" s="${xfOf(summaryStyle(kind, col, tags[col] || ""))}"`;
+    });
+    xml = xml.replace("<sheetView workbookViewId=\"0\"/>", "<sheetView workbookViewId=\"0\" showGridLines=\"0\"/>");
+    // 인쇄할 때 A4 세로 한 장 너비에 맞춤
+    xml = xml.replace(/(<worksheet[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+    const ps = '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/>';
+    xml = /<ignoredErrors/.test(xml) ? xml.replace("<ignoredErrors", ps + "<ignoredErrors") : xml.replace("</worksheet>", ps + "</worksheet>");
+    const addTo = (tag, items) => { if (!items.length) return; css = css.replace(new RegExp(`<${tag} count="(\\d+)">([\\s\\S]*?)</${tag}>`), (m, n, body) => `<${tag} count="${+n + items.length}">${body}${items.join("")}</${tag}>`); };
+    addTo("fonts", fonts); addTo("fills", fills); addTo("borders", borders); addTo("cellXfs", xfs);
+    const nfs = `<numFmt numFmtId="200" formatCode="#,##0;-#,##0;&quot;–&quot;"/><numFmt numFmtId="201" formatCode="0%;-0%;&quot;–&quot;"/>`;
+    css = /<numFmts count="\d+">/.test(css) ? css.replace(/<numFmts count="(\d+)">/, (m, n) => `<numFmts count="${+n + 2}">${nfs}`) : css.replace(/(<styleSheet[^>]*>)/, `$1<numFmts count="2">${nfs}</numFmts>`);
+    setXml(st, css); setXml(sh, xml);
   }
   // 결과 엑셀 '요약' 시트: 점검대상목록을 COUNTIFS·SUMIFS로 세는 수식표라, 엑셀에서 검토결과·소명결과를 고치면 숫자가 바로 바뀜
   // (SheetJS 무료판은 피벗 테이블을 만들지 못함). 행 순서는 저장할 때의 지적 건수 기준으로 고정
@@ -812,28 +872,29 @@
     const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
     const flagged = (r) => r.검토결과 === "소명요청" || r.검토결과 === "부적정";
     const aoa = [];
-    const put = (row) => aoa.push(row);
+    const kinds = [];  // 행마다 [종류, 열별 강조] → 저장 후 서식으로 바꿈(styleSummary)
+    const put = (row, kind = row.length ? "body" : "blank", tags = []) => { aoa.push(row); kinds.push([kind, tags]); };
     // 셀: [수식, 미리 계산한 값, 표시형식]
     const F = (f, v, z) => ({ t: "n", f, v, ...(z ? { z } : {}) });
     const cnt = (pred) => rows.filter(pred).length, sum = (pred) => rows.filter(pred).reduce((a, r) => a + (Number(r.금액) || 0), 0);
-    put([`${S.month} 법인카드 점검결과 요약`]);
-    put([`점검대상목록 ${N}건 기준. 점검대상목록 시트에서 검토결과·소명결과를 고치면 아래 숫자가 바로 바뀝니다. 지적 = 소명요청 + 부적정. 행 순서는 저장할 때 기준입니다.`]);
+    put([`${S.month} 법인카드 점검결과 요약`], "title");
+    put([`점검대상목록 ${N}건 기준. 점검대상목록 시트에서 검토결과·소명결과를 고치면 아래 숫자가 바로 바뀝니다. 지적 = 소명요청 + 부적정. 행 순서는 저장할 때 기준입니다.`], "sub");
     put([]);
     // ① 검토결과별
-    put(["① 검토결과별 건수·금액"]);
-    put(["검토결과", "상", "중", "하", "건수", "비율", "금액(원)"]);
+    put(["① 검토결과별 건수·금액"], "sec");
+    put(["검토결과", "상", "중", "하", "건수", "비율", "금액(원)"], "head");
     const top = aoa.length + 1;
     for (const v of ["미검토", "소명요청", "부적정", "적정"]) {
       const key = v === "미검토" ? "" : v, m = (r) => (r.검토결과 || "") === key, rr = aoa.length + 1;
       put([v, ...["상", "중", "하"].map((g) => F(`COUNTIFS(${RV},${q(key)},${GR},${q(g)})`, cnt((r) => m(r) && r.등급 === g))),
-        F(`SUM(B${rr}:D${rr})`, cnt(m)), F(`IF(${N}=0,0,E${rr}/${N})`, N ? cnt(m) / N : 0, "0%"), F(`SUMIFS(${AM},${RV},${q(key)})`, sum(m), "#,##0")]);
+        F(`SUM(B${rr}:D${rr})`, cnt(m)), F(`IF(${N}=0,0,E${rr}/${N})`, N ? cnt(m) / N : 0, "0%"), F(`SUMIFS(${AM},${RV},${q(key)})`, sum(m), "#,##0")], `rv-${v}`, ["", "", "", "", "", "pct"]);
     }
     const tr = aoa.length + 1, col = (c) => `SUM(${c}${top}:${c}${tr - 1})`;
-    put(["합계", ...["B", "C", "D", "E"].map((c, i) => F(col(c), i < 3 ? cnt((r) => r.등급 === ["상", "중", "하"][i]) : N)), F(col("F"), 1, "0%"), F(col("G"), sum(() => true), "#,##0")]);
+    put(["합계", ...["B", "C", "D", "E"].map((c, i) => F(col(c), i < 3 ? cnt((r) => r.등급 === ["상", "중", "하"][i]) : N)), F(col("F"), 1, "0%"), F(col("G"), sum(() => true), "#,##0")], "total", ["", "", "", "", "", "pct"]);
     put([]);
     // ② 규칙별
-    put(["② 규칙별 검토결과 (지적 건수 → 지적 금액 순)"]);
-    put(["점검 규칙", "선별", "지적", "지적 금액(원)", "적정", "미검토"]);
+    put(["② 규칙별 검토결과 (지적 건수 → 지적 금액 순)"], "sec");
+    put(["점검 규칙", "선별", "지적", "지적 금액(원)", "적정", "미검토"], "head");
     const codes = [...new Set(rows.flatMap((r) => String(r["걸린 규칙"] || "").split(" / ").filter(Boolean)))];
     const ruleRows = codes.map((label) => {
       const code = label.split(" ")[0], pat = `*${code} *`, has = (r) => ` ${r["걸린 규칙"]} `.includes(` ${code} `) || String(r["걸린 규칙"]).startsWith(`${code} `);
@@ -843,34 +904,36 @@
       const P = `${RU},${q(x.pat)}`;
       put([x.label, F(`COUNTIFS(${P})`, cnt(x.has)), F(`COUNTIFS(${P},${RV},"소명요청")+COUNTIFS(${P},${RV},"부적정")`, x.f),
         F(`SUMIFS(${AM},${P},${RV},"소명요청")+SUMIFS(${AM},${P},${RV},"부적정")`, x.fa, "#,##0"),
-        F(`COUNTIFS(${P},${RV},"적정")`, cnt((r) => x.has(r) && r.검토결과 === "적정")), F(`COUNTIFS(${P},${RV},"")`, cnt((r) => x.has(r) && !r.검토결과))]);
+        F(`COUNTIFS(${P},${RV},"적정")`, cnt((r) => x.has(r) && r.검토결과 === "적정")), F(`COUNTIFS(${P},${RV},"")`, cnt((r) => x.has(r) && !r.검토결과))], "body", ["", "", "fl", "fl", "", "mu"]);
     }
-    put(["한 건이 여러 규칙에 걸리면 규칙마다 한 번씩 세므로 규칙별 합계는 전체 건수보다 많습니다."]);
+    put(["한 건이 여러 규칙에 걸리면 규칙마다 한 번씩 세므로 규칙별 합계는 전체 건수보다 많습니다."], "note");
     put([]);
     // ③ 부서별
-    put(["③ 부서별 검토결과 (지적 건수 → 지적 금액 순)"]);
-    put(["예산부서", "선별", "지적", "지적 금액(원)", "부적정", "적정", "미검토"]);
+    put(["③ 부서별 검토결과 (지적 건수 → 지적 금액 순)"], "sec");
+    put(["예산부서", "선별", "지적", "지적 금액(원)", "부적정", "적정", "미검토"], "head");
     const depts = [...new Set(rows.map((r) => r.부서 || ""))].map((d) => ({ d, f: cnt((r) => r.부서 === d && flagged(r)), fa: sum((r) => r.부서 === d && flagged(r)) }))
       .sort((a, b) => b.f - a.f || b.fa - a.fa || a.d.localeCompare(b.d));
     for (const { d, f, fa } of depts) {
       const P = `${DP},${q(d)}`, m = (r) => r.부서 === d;
       put([d, F(`COUNTIFS(${P})`, cnt(m)), F(`COUNTIFS(${P},${RV},"소명요청")+COUNTIFS(${P},${RV},"부적정")`, f),
         F(`SUMIFS(${AM},${P},${RV},"소명요청")+SUMIFS(${AM},${P},${RV},"부적정")`, fa, "#,##0"),
-        F(`COUNTIFS(${P},${RV},"부적정")`, cnt((r) => m(r) && r.검토결과 === "부적정")), F(`COUNTIFS(${P},${RV},"적정")`, cnt((r) => m(r) && r.검토결과 === "적정")), F(`COUNTIFS(${P},${RV},"")`, cnt((r) => m(r) && !r.검토결과))]);
+        F(`COUNTIFS(${P},${RV},"부적정")`, cnt((r) => m(r) && r.검토결과 === "부적정")), F(`COUNTIFS(${P},${RV},"적정")`, cnt((r) => m(r) && r.검토결과 === "적정")), F(`COUNTIFS(${P},${RV},"")`, cnt((r) => m(r) && !r.검토결과))], "body", ["", "", "fl", "fl", "ng", "", "mu"]);
     }
     put([]);
     // ④ 소명 처리 현황
-    put(["④ 소명 처리 현황 (검토결과가 소명요청인 건)"]);
-    put(["예산부서", "소명요청", ...SM_RESULTS, "결과 미입력"]);
+    put(["④ 소명 처리 현황 (검토결과가 소명요청인 건)"], "sec");
+    put(["예산부서", "소명요청", ...SM_RESULTS, "결과 미입력"], "head");
     const s4 = aoa.length + 1, ask = (r) => r.검토결과 === "소명요청";
     for (const { d } of depts) {
       const P = `${DP},${q(d)},${RV},"소명요청"`, m = (r) => r.부서 === d && ask(r);
-      put([d, F(`COUNTIFS(${P})`, cnt(m)), ...SM_RESULTS.map((x) => F(`COUNTIFS(${P},${SR},${q(x)})`, cnt((r) => m(r) && r.소명결과 === x))), F(`COUNTIFS(${P},${SR},"")`, cnt((r) => m(r) && !r.소명결과))]);
+      put([d, F(`COUNTIFS(${P})`, cnt(m)), ...SM_RESULTS.map((x) => F(`COUNTIFS(${P},${SR},${q(x)})`, cnt((r) => m(r) && r.소명결과 === x))), F(`COUNTIFS(${P},${SR},"")`, cnt((r) => m(r) && !r.소명결과))], "body", ["", "", "", "ng", "wa", "mu"]);
     }
     const e4 = aoa.length;
-    put(["합계", ...["B", "C", "D", "E", "F"].map((c, i) => F(`SUM(${c}${s4}:${c}${e4})`, i === 0 ? cnt(ask) : i <= 3 ? cnt((r) => ask(r) && r.소명결과 === SM_RESULTS[i - 1]) : cnt((r) => ask(r) && !r.소명결과)))]);
+    put(["합계", ...["B", "C", "D", "E", "F"].map((c, i) => F(`SUM(${c}${s4}:${c}${e4})`, i === 0 ? cnt(ask) : i <= 3 ? cnt((r) => ask(r) && r.소명결과 === SM_RESULTS[i - 1]) : cnt((r) => ask(r) && !r.소명결과)))], "total");
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+    ws["!cols"] = [{ wch: 30 }, { wch: 11 }, { wch: 11 }, { wch: 15 }, { wch: 11 }, { wch: 11 }, { wch: 15 }];
+    ws["!rows"] = kinds.map(([k]) => ({ hpt: { title: 30, sub: 18, sec: 26, head: 22, blank: 10, note: 18 }[k] || 20 }));
+    SUMMARY_KINDS = kinds;
     return ws;
   }
   function saveFile(wb, name, post) {
@@ -878,10 +941,12 @@
     let b64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
     if (post) {
       try {
-        const u8 = new Uint8Array(post(XLSX.write(wb, { bookType: "xlsx", type: "array" })));
+        const zip = XLSX.CFB.read(new Uint8Array(XLSX.write(wb, { bookType: "xlsx", type: "array" })), { type: "array" });
+        post(zip);
+        const u8 = new Uint8Array(XLSX.CFB.write(zip, { fileType: "zip", type: "array" }));
         let bin = ""; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
         b64 = btoa(bin);
-      } catch (e) { console.error("유효성 검사 추가 실패, 목록 없이 저장", e); }
+      } catch (e) { console.error("서식·목록 추가 실패, 기본 형태로 저장", e); }
     }
     const a = document.createElement("a"); a.href = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + b64; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
