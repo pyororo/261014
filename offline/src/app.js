@@ -774,15 +774,16 @@
   });
   $("#xlsxBtn").addEventListener("click", () => {
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, commaSheet(XLSX.utils.json_to_sheet(exportRows())), "점검대상목록");
+    const rows = exportRows();
+    XLSX.utils.book_append_sheet(wb, summarySheet(rows), "요약");
+    XLSX.utils.book_append_sheet(wb, commaSheet(XLSX.utils.json_to_sheet(rows)), "점검대상목록");
     const per = [];
     for (const [k, list] of Object.entries(R.period)) for (const x of list) per.push({ 패턴: `${k} ${ENGINE.T_NAMES[k]}`, 대상: x.who, 부서: x.dept || "", 가맹점: x.merchant || "", 기준월: x.month || "", 지표: k === "T-R1" ? `3개월 ${x.n}회, ${fmt(x.amount)}원 ${x.focus || ""}` : k === "T-R2" ? `${fmt(x.cur)}원 / 직전 6개월 평균 ${fmt(x.avg)}원 (×${x.ratio.toFixed(1)})` : k === "T-R3" ? `월말 5영업일 ${(x.share * 100).toFixed(0)}%, 부서 평균의 ${(x.total / x.avg).toFixed(1)}배` : `${fmt(x.amount)}원 ${x.months}개월 연속`, 관련건수: x.rows.length });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per.length ? per : [{ 패턴: "해당 없음" }]), "기간패턴");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(R.recs.map((r) => ({ 추천항목: r.title, 근거: r.basis, 이유: r.why, 규칙안: r.rule }))), "추가점검항목");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(appliedRows()), "적용기준");
-    const rows = exportRows(), heads = Object.keys(rows[0] || {});
-    const ci = heads.indexOf("소명결과");
-    saveFile(wb, `card-audit_result_${S.month}.xlsx`, ci < 0 ? null : (u8) => addListValidation(u8, 0, XLSX.utils.encode_col(ci), rows.length + 1, SM_RESULTS, "소명요청 건의 회신 결과를 고르세요: 소명 인정 / 부적정 전환 / 미회신"));
+    const ci = Object.keys(rows[0] || {}).indexOf("소명결과");
+    saveFile(wb, `card-audit_result_${S.month}.xlsx`, ci < 0 ? null : (u8) => addListValidation(u8, 1, XLSX.utils.encode_col(ci), rows.length + 1, SM_RESULTS, "소명요청 건의 회신 결과를 고르세요: 소명 인정 / 부적정 전환 / 미회신"));
     flash("#xlsxBtn", "저장했습니다");
   });
   // 소명 관리 열: 결과 엑셀에 빈칸으로 만들어 두고, 다시 불러오면 적은 내용을 되살림
@@ -800,6 +801,77 @@
     xml = at >= 0 ? xml.slice(0, at) + dv + xml.slice(at) : xml.replace("</worksheet>", dv + "</worksheet>");
     ent.content = new TextEncoder().encode(xml); ent.size = ent.content.length;
     return XLSX.CFB.write(zip, { fileType: "zip", type: "array" });
+  }
+  // 결과 엑셀 '요약' 시트: 점검대상목록을 COUNTIFS·SUMIFS로 세는 수식표라, 엑셀에서 검토결과·소명결과를 고치면 숫자가 바로 바뀜
+  // (SheetJS 무료판은 피벗 테이블을 만들지 못함). 행 순서는 저장할 때의 지적 건수 기준으로 고정
+  function summarySheet(rows) {
+    const heads = Object.keys(rows[0] || {});
+    const N = rows.length, last = N + 1;
+    const rng = (h) => `점검대상목록!$${XLSX.utils.encode_col(heads.indexOf(h))}$2:$${XLSX.utils.encode_col(heads.indexOf(h))}$${last}`;
+    const RV = rng("검토결과"), GR = rng("등급"), AM = rng("금액"), RU = rng("걸린 규칙"), DP = rng("부서"), SR = rng("소명결과");
+    const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const flagged = (r) => r.검토결과 === "소명요청" || r.검토결과 === "부적정";
+    const aoa = [];
+    const put = (row) => aoa.push(row);
+    // 셀: [수식, 미리 계산한 값, 표시형식]
+    const F = (f, v, z) => ({ t: "n", f, v, ...(z ? { z } : {}) });
+    const cnt = (pred) => rows.filter(pred).length, sum = (pred) => rows.filter(pred).reduce((a, r) => a + (Number(r.금액) || 0), 0);
+    put([`${S.month} 법인카드 점검결과 요약`]);
+    put([`점검대상목록 ${N}건 기준. 점검대상목록 시트에서 검토결과·소명결과를 고치면 아래 숫자가 바로 바뀝니다. 지적 = 소명요청 + 부적정. 행 순서는 저장할 때 기준입니다.`]);
+    put([]);
+    // ① 검토결과별
+    put(["① 검토결과별 건수·금액"]);
+    put(["검토결과", "상", "중", "하", "건수", "비율", "금액(원)"]);
+    const top = aoa.length + 1;
+    for (const v of ["미검토", "소명요청", "부적정", "적정"]) {
+      const key = v === "미검토" ? "" : v, m = (r) => (r.검토결과 || "") === key, rr = aoa.length + 1;
+      put([v, ...["상", "중", "하"].map((g) => F(`COUNTIFS(${RV},${q(key)},${GR},${q(g)})`, cnt((r) => m(r) && r.등급 === g))),
+        F(`SUM(B${rr}:D${rr})`, cnt(m)), F(`IF(${N}=0,0,E${rr}/${N})`, N ? cnt(m) / N : 0, "0%"), F(`SUMIFS(${AM},${RV},${q(key)})`, sum(m), "#,##0")]);
+    }
+    const tr = aoa.length + 1, col = (c) => `SUM(${c}${top}:${c}${tr - 1})`;
+    put(["합계", ...["B", "C", "D", "E"].map((c, i) => F(col(c), i < 3 ? cnt((r) => r.등급 === ["상", "중", "하"][i]) : N)), F(col("F"), 1, "0%"), F(col("G"), sum(() => true), "#,##0")]);
+    put([]);
+    // ② 규칙별
+    put(["② 규칙별 검토결과 (지적 건수 → 지적 금액 순)"]);
+    put(["점검 규칙", "선별", "지적", "지적 금액(원)", "적정", "미검토"]);
+    const codes = [...new Set(rows.flatMap((r) => String(r["걸린 규칙"] || "").split(" / ").filter(Boolean)))];
+    const ruleRows = codes.map((label) => {
+      const code = label.split(" ")[0], pat = `*${code} *`, has = (r) => ` ${r["걸린 규칙"]} `.includes(` ${code} `) || String(r["걸린 규칙"]).startsWith(`${code} `);
+      return { label, pat, has, f: cnt((r) => has(r) && flagged(r)), fa: sum((r) => has(r) && flagged(r)) };
+    }).sort((a, b) => b.f - a.f || b.fa - a.fa || a.label.localeCompare(b.label));
+    for (const x of ruleRows) {
+      const P = `${RU},${q(x.pat)}`;
+      put([x.label, F(`COUNTIFS(${P})`, cnt(x.has)), F(`COUNTIFS(${P},${RV},"소명요청")+COUNTIFS(${P},${RV},"부적정")`, x.f),
+        F(`SUMIFS(${AM},${P},${RV},"소명요청")+SUMIFS(${AM},${P},${RV},"부적정")`, x.fa, "#,##0"),
+        F(`COUNTIFS(${P},${RV},"적정")`, cnt((r) => x.has(r) && r.검토결과 === "적정")), F(`COUNTIFS(${P},${RV},"")`, cnt((r) => x.has(r) && !r.검토결과))]);
+    }
+    put(["한 건이 여러 규칙에 걸리면 규칙마다 한 번씩 세므로 규칙별 합계는 전체 건수보다 많습니다."]);
+    put([]);
+    // ③ 부서별
+    put(["③ 부서별 검토결과 (지적 건수 → 지적 금액 순)"]);
+    put(["예산부서", "선별", "지적", "지적 금액(원)", "부적정", "적정", "미검토"]);
+    const depts = [...new Set(rows.map((r) => r.부서 || ""))].map((d) => ({ d, f: cnt((r) => r.부서 === d && flagged(r)), fa: sum((r) => r.부서 === d && flagged(r)) }))
+      .sort((a, b) => b.f - a.f || b.fa - a.fa || a.d.localeCompare(b.d));
+    for (const { d, f, fa } of depts) {
+      const P = `${DP},${q(d)}`, m = (r) => r.부서 === d;
+      put([d, F(`COUNTIFS(${P})`, cnt(m)), F(`COUNTIFS(${P},${RV},"소명요청")+COUNTIFS(${P},${RV},"부적정")`, f),
+        F(`SUMIFS(${AM},${P},${RV},"소명요청")+SUMIFS(${AM},${P},${RV},"부적정")`, fa, "#,##0"),
+        F(`COUNTIFS(${P},${RV},"부적정")`, cnt((r) => m(r) && r.검토결과 === "부적정")), F(`COUNTIFS(${P},${RV},"적정")`, cnt((r) => m(r) && r.검토결과 === "적정")), F(`COUNTIFS(${P},${RV},"")`, cnt((r) => m(r) && !r.검토결과))]);
+    }
+    put([]);
+    // ④ 소명 처리 현황
+    put(["④ 소명 처리 현황 (검토결과가 소명요청인 건)"]);
+    put(["예산부서", "소명요청", ...SM_RESULTS, "결과 미입력"]);
+    const s4 = aoa.length + 1, ask = (r) => r.검토결과 === "소명요청";
+    for (const { d } of depts) {
+      const P = `${DP},${q(d)},${RV},"소명요청"`, m = (r) => r.부서 === d && ask(r);
+      put([d, F(`COUNTIFS(${P})`, cnt(m)), ...SM_RESULTS.map((x) => F(`COUNTIFS(${P},${SR},${q(x)})`, cnt((r) => m(r) && r.소명결과 === x))), F(`COUNTIFS(${P},${SR},"")`, cnt((r) => m(r) && !r.소명결과))]);
+    }
+    const e4 = aoa.length;
+    put(["합계", ...["B", "C", "D", "E", "F"].map((c, i) => F(`SUM(${c}${s4}:${c}${e4})`, i === 0 ? cnt(ask) : i <= 3 ? cnt((r) => ask(r) && r.소명결과 === SM_RESULTS[i - 1]) : cnt((r) => ask(r) && !r.소명결과)))]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+    return ws;
   }
   function saveFile(wb, name, post) {
     // 파일(file://)로 연 페이지에서는 blob 주소와 한글 파일명이 무시될 수 있어 data 주소 + 영문 파일명으로 저장
