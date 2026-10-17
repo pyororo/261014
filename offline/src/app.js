@@ -810,7 +810,7 @@
     const p = `style="${F}margin:0 0 12px;line-height:1.6"`;
     const rows = g.items.map((r, i) => `<tr><td ${td("text-align:center")}>${i + 1}</td><td ${td("white-space:nowrap")}>${r.dkey} ${r.time.slice(0, 5)}</td><td ${td()}>${esc(who(r))}</td><td ${td()}>${esc(r.merchant)}</td><td ${td("text-align:right;white-space:nowrap")}>${fmt(r.amount)}</td><td ${td()}>${esc(r.glName)}</td><td ${td()}>${r.memo ? esc(r.memo) : "(공란)"}</td><td ${td("min-width:130px")}>${esc(ENGINE.reasonShort(r))}</td><td ${td("min-width:130px")}>${r.checks.map(esc).join("<br>")}</td><td ${td("min-width:60px")}></td></tr>`).join("");
     return `<p ${p}>안녕하세요,<br>감사부 ${sender}입니다.</p>`
-      + `<p ${p}>${monthKo()} 법인카드 사용 적정성 점검 결과, 아래 ${g.items.length}건의 사용 내역에 대해 확인이 필요하여 소명을 요청드립니다.${g.emp ? "" : " 공용카드 사용 건으로 실제 사용자가 전표에 기재되지 않았습니다."}</p>`
+      + `<p ${p}>${monthKo()} 법인카드 사용 적정성 점검 결과, 아래 ${g.items.length}건의 사용 내역에 대해 확인이 필요하여 소명을 요청드립니다.</p>`
       + `<table style="border-collapse:collapse;width:100%;margin:4px 0 14px" cellpadding="0" cellspacing="0"><tr>${["No", "승인일시", "직원(참조)", "가맹점", "금액(원)", "계정명", "전표 품목 텍스트", "선별 사유", "확인 요청 사항", "비고"].map((h) => `<th ${th}>${h}</th>`).join("")}</tr>${rows}</table>`
       + `<p ${p}>• <b>회신 기한</b>: ${withWd(M.due)}<br>• <b>회신 방법</b>: 건별 확인 요청 사항에 대한 답변 및 증빙(영수증, 품의서 등)을 첨부하여 메일 회신 요청드립니다.</p>`
       + `<p ${p}>감사합니다.<br>${sender} 드림</p>`;
