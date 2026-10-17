@@ -843,7 +843,7 @@
     $("#mmClose").focus();
   }
   function renderMail() {
-    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(g.emp || "-")}</span><small>${esc(g.dept)}${g.emp ? "" : " · 카드 관리자에게"}</small><small>참조 ${esc([...new Set(g.items.map((r) => r.writer || "-"))].join(", "))}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
+    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(`${g.emp || "-"}(${[...new Set(g.items.map((r) => r.writer).filter(Boolean))].join(", ") || "참조 없음"})`)}</span><small>${esc(g.dept)}${g.emp ? "" : " · 카드 관리자에게"}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
     const g = M.groups[M.sel], e = M.edits[g.key] || {};
     $("#mmSubj").value = e.subj ?? mailSubject(g);
     $("#mmBody").innerHTML = e.body ?? mailBody(g);
