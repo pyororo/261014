@@ -206,7 +206,7 @@ const ENGINE = (() => {
       const sabun = ref참조.includes("/") ? ref참조.split("/")[0].trim() : "";
       const emp = ref.empById.get(sabun) || ref.empByName.get(str(r["직원명"])) || null;
       rows.push({
-        no, card: str(r["카드번호"]), kind: str(r["구분"]), emp: str(r["직원명"]), empId: emp ? emp.id : sabun, work: emp ? emp.work : "",
+        no, card: str(r["카드번호"]), kind: str(r["구분"]), emp: str(r["직원명"]), writer: ref참조, empId: emp ? emp.id : sabun, work: emp ? emp.work : "",
         dept: str(r["예산부서명"]), deptCode: str(r["예산부서"]), date: d, dkey: key, month: monthKey(d), time: `${pad(hh)}:${pad(mi)}`, hour: hh, dt,
         wd, wdName: WD[wd], holiday: wd === 0 || wd === 6 || !!holName, holName,
         gl: str(r["G/L 계정"]), glName: str(r["G/L 계정명"]) || (acc ? acc.name : ""), industry: str(r["가맹점업종"]) || (ind ? ind.name : ""), indCode: str(r["업종코드"]),
@@ -367,7 +367,7 @@ const ENGINE = (() => {
   function reasonSentence(r) {
     const p = phrases(r);
     if (!p.length) return "";
-    let s = `${r.emp || "사용자 미기재(공용카드)"}의 ${r.merchant}(${r.industry}) ${won(r.amount)} 결제: ${p.join(", ")}.`;
+    let s = `${r.emp || "-"}${r.writer ? `(${r.writer})` : ""}의 ${r.merchant}(${r.industry}) ${won(r.amount)} 결제: ${p.join(", ")}.`;
     if (r.adjustReason) s += ` 다만 ${r.adjustReason}.`;
     return s;
   }

@@ -3,6 +3,8 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const won = ENGINE.won;
+  // 직원명은 카드 주인, 참조는 전표 작성자 → '권윤슬(20016/권윤슬)', 직원명 공란이면 '-(20012/류단비)'
+  const who = (r) => `${r.emp || "-"}${r.writer ? `(${r.writer})` : ""}`;
   const fmt = (n) => Math.round(n).toLocaleString("ko-KR");
   // 천 단위 쉼표: 소수는 그대로 두고 정수부만 끊음 (0.5 → 0.5, 300000 → 300,000)
   const fmt2 = (n) => Number(n).toLocaleString("ko-KR", { maximumFractionDigits: 4 });
@@ -261,7 +263,7 @@
         <td><span class="g g-${r.grade}">${r.grade}</span></td><td class="n">${r.score}${r.adjust ? `<div class="muted" title="사전승인 기재로 조정">${r.ruleScore}→${r.score}</div>` : ""}</td>
         <td><div class="chips">${ruleChips(r)}</div></td>
         <td class="when"><span class="mono">${r.dkey.slice(5)}</span>(${m("day", r.holName || r.wdName)}) <span class="mono">${m("time", r.time)}</span>${r.hits.has("R17") ? `<div class="muted">${m("day", "휴가 중")}</div>` : ""}${r.hits.has("R15") ? `<div class="muted">${m("settle", `정산 ${Math.round((r.acctDate - r.date) / 86400000)}일`)}</div>` : ""}</td>
-        <td style="white-space:nowrap">${m("who", esc(r.emp) || '<span class="ng-txt">미기재</span>')}<div class="muted">${esc(r.dept)}</div></td>
+        <td style="white-space:nowrap">${m("who", r.emp ? esc(who(r)) : `<span class="ng-txt">-</span>${r.writer ? esc(`(${r.writer})`) : ""}`)}<div class="muted">${esc(r.dept)}</div></td>
         <td class="mer">${m("mer", esc(r.merchant))}${r.overseas ? ` <span class="muted">(${esc(r.currency || "해외")})</span>` : ""}<div class="muted">${m("ind", esc(r.industry))} · ${m("gl", esc(r.glName))}</div>
           <div class="memo-line"><span class="lbl">적요</span><span>${m("memo", r.memo ? esc(r.memo) : '<span class="ng-txt">적요 공란</span>')}</span></div>${m.has("title") ? `<div class="memo-line"><span class="lbl">제목</span><span>${m("title", esc(r.title))}</span></div>` : ""}</td>
         <td class="n">${m("amt", fmt(r.amount))}${r.limit && (r.hits.has("R05") || r.hits.has("R04")) ? `<div class="muted">한도 ${fmt(r.limit)}</div>` : ""}</td>
@@ -281,7 +283,7 @@
         <dl class="kv">
           <dt>승인일시</dt><dd class="mono">${r.dkey} ${r.time} (${r.holName || r.wdName + "요일"})</dd>
           <dt>카드 · 구분</dt><dd class="mono">${esc(r.card)} · ${esc(r.kind)}</dd>
-          <dt>직원 · 부서</dt><dd>${esc(r.emp) || "미기재"} · ${esc(r.dept)}${r.work ? ` (근무지 ${esc(r.work)})` : ""}</dd>
+          <dt>직원 · 부서</dt><dd>${esc(who(r))} · ${esc(r.dept)}${r.work ? ` (근무지 ${esc(r.work)})` : ""}</dd>
           <dt>가맹점</dt><dd>${esc(r.merchant)} · ${esc(r.industry)} (${esc(r.restrict)})<br><span class="muted">${esc(r.addr)}</span></dd>
           <dt>계정</dt><dd>${esc(r.gl)} ${esc(r.glName)}${r.limit ? ` · 건당한도 ${won(r.limit)}` : ""}</dd>
           <dt>금액</dt><dd class="mono">${won(r.amount)}${r.overseas ? ` (${esc(r.currency)})` : ""}</dd>
@@ -698,7 +700,7 @@
     $("#browseTbl").innerHTML = `<thead><tr><th>등급</th><th>규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점</th><th>계정</th><th style="text-align:right">금액</th><th>적요</th></tr></thead><tbody>` +
       (shown.length ? shown.map((r) => `<tr class="${r.grade ? "sev-" + r.grade : ""}"><td>${r.excluded ? '<span class="muted">상계</span>' : r.grade ? `<span class="g g-${r.grade}">${r.grade}</span>` : ""}</td>
         <td><div class="chips">${r.excluded ? "" : ruleChips(r)}</div></td><td class="mono" style="white-space:nowrap">${r.dkey.slice(5)} ${r.time}<div class="muted">${r.holName || r.wdName}</div></td>
-        <td style="white-space:nowrap">${esc(r.emp) || '<span class="muted">미기재</span>'}<div class="muted">${esc(r.dept)}</div></td><td>${esc(r.merchant)}<div class="muted">${esc(r.industry)}</div></td>
+        <td style="white-space:nowrap">${esc(who(r))}<div class="muted">${esc(r.dept)}</div></td><td>${esc(r.merchant)}<div class="muted">${esc(r.industry)}</div></td>
         <td>${esc(r.glName)}</td><td class="n">${fmt(r.amount)}</td><td class="reason">${esc(r.memo)}</td></tr>`).join("")
         : `<tr><td colspan="8" class="empty">조건에 맞는 거래가 없습니다.</td></tr>`) + "</tbody>";
   }
@@ -797,19 +799,19 @@
   }
   const M = { groups: [], sel: 0, edits: {}, done: new Set(), due: "", today: "" };
   const monthKo = () => `${S.month.slice(0, 4)}년 ${Number(S.month.slice(5))}월`;
-  const mailName = (g) => (g.emp ? g.emp : "사용자 미기재 (공용카드)");
+  const mailName = (g) => g.emp || g.dept; // 제목 괄호: 직원명, 공란이면 부서명
   const mailSubject = (g) => `[감사] ${monthKo()} 법인카드 사용내역 소명 요청 (${mailName(g)}, ${g.items.length}건)`;
   // 메일 프로그램에 붙여도 모양이 유지되도록 서식은 모두 인라인으로 넣음
   function mailBody(g) {
     const sender = esc(store.get("cc_sender", "") || "○○○");
     const F = "font-family:'맑은 고딕','Malgun Gothic',sans-serif;font-size:10pt;color:#1c2320;";
-    const th = `style="${F}background:#e2edf0;color:#1d5a6e;font-weight:bold;text-align:left;padding:6px 8px;border:1px solid #b9c4c0;white-space:nowrap"`;
+    const th = `style="${F}background:#e2edf0;color:#1d5a6e;font-weight:bold;text-align:left;padding:6px 8px;border:1px solid #b9c4c0"`;
     const td = (x = "") => `style="${F}padding:6px 8px;border:1px solid #b9c4c0;vertical-align:top;${x}"`;
     const p = `style="${F}margin:0 0 12px;line-height:1.6"`;
-    const rows = g.items.map((r, i) => `<tr><td ${td("text-align:center")}>${i + 1}</td><td ${td("white-space:nowrap")}>${r.dkey} ${r.time.slice(0, 5)}</td><td ${td("white-space:nowrap")}>${esc(r.merchant)}</td><td ${td("text-align:right;white-space:nowrap")}>${fmt(r.amount)}</td><td ${td("white-space:nowrap")}>${esc(r.glName)}</td><td ${td()}>${r.memo ? esc(r.memo) : "(공란)"}</td><td ${td()}>${esc(ENGINE.reasonShort(r))}</td><td ${td()}>${r.checks.map(esc).join("<br>")}</td><td ${td("min-width:90px")}></td></tr>`).join("");
+    const rows = g.items.map((r, i) => `<tr><td ${td("text-align:center")}>${i + 1}</td><td ${td("white-space:nowrap")}>${r.dkey} ${r.time.slice(0, 5)}</td><td ${td()}>${esc(who(r))}</td><td ${td()}>${esc(r.merchant)}</td><td ${td("text-align:right;white-space:nowrap")}>${fmt(r.amount)}</td><td ${td()}>${esc(r.glName)}</td><td ${td()}>${r.memo ? esc(r.memo) : "(공란)"}</td><td ${td("min-width:130px")}>${esc(ENGINE.reasonShort(r))}</td><td ${td("min-width:130px")}>${r.checks.map(esc).join("<br>")}</td><td ${td("min-width:60px")}></td></tr>`).join("");
     return `<p ${p}>안녕하세요,<br>감사부 ${sender}입니다.</p>`
       + `<p ${p}>${monthKo()} 법인카드 사용 적정성 점검 결과, 아래 ${g.items.length}건의 사용 내역에 대해 확인이 필요하여 소명을 요청드립니다.${g.emp ? "" : " 공용카드 사용 건으로 실제 사용자가 전표에 기재되지 않았습니다."}</p>`
-      + `<table style="border-collapse:collapse;margin:4px 0 14px" cellpadding="0" cellspacing="0"><tr>${["No", "승인일시", "가맹점", "금액(원)", "계정명", "전표 품목 텍스트", "선별 사유", "확인 요청 사항", "비고"].map((h) => `<th ${th}>${h}</th>`).join("")}</tr>${rows}</table>`
+      + `<table style="border-collapse:collapse;width:100%;margin:4px 0 14px" cellpadding="0" cellspacing="0"><tr>${["No", "승인일시", "직원(참조)", "가맹점", "금액(원)", "계정명", "전표 품목 텍스트", "선별 사유", "확인 요청 사항", "비고"].map((h) => `<th ${th}>${h}</th>`).join("")}</tr>${rows}</table>`
       + `<p ${p}>• <b>회신 기한</b>: ${withWd(M.due)}<br>• <b>회신 방법</b>: 건별 확인 요청 사항에 대한 답변 및 증빙(영수증, 품의서 등)을 첨부하여 메일 회신 요청드립니다.</p>`
       + `<p ${p}>감사합니다.<br>${sender} 드림</p>`;
   }
@@ -841,7 +843,7 @@
     $("#mmClose").focus();
   }
   function renderMail() {
-    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(g.emp || "사용자 미기재")}</span><small>${esc(g.dept)}${g.emp ? "" : " · 카드 관리자에게"}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
+    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(g.emp || "-")}</span><small>${esc(g.dept)}${g.emp ? "" : " · 카드 관리자에게"}</small><small>참조 ${esc([...new Set(g.items.map((r) => r.writer || "-"))].join(", "))}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
     const g = M.groups[M.sel], e = M.edits[g.key] || {};
     $("#mmSubj").value = e.subj ?? mailSubject(g);
     $("#mmBody").innerHTML = e.body ?? mailBody(g);
@@ -1065,7 +1067,7 @@
   function flash(sel, msg) { const b = $(sel); const t = b.textContent; b.textContent = msg; b.disabled = true; setTimeout(() => { b.textContent = t; b.disabled = false; }, 1600); }
   function exportRows() {
     return R.list.map((r) => ({
-      승인번호: r.no, 승인일시: `${r.dkey} ${r.time}`, 직원: r.emp || "미기재", 부서: r.dept, 가맹점: r.merchant, 업종: r.industry, 계정: r.glName, 금액: r.amount,
+      승인번호: r.no, 승인일시: `${r.dkey} ${r.time}`, 직원: who(r), 부서: r.dept, 가맹점: r.merchant, 업종: r.industry, 계정: r.glName, 금액: r.amount,
       "걸린 규칙": [...r.hits].sort().map((h) => `${h} ${ENGINE.ruleName(h)}`).concat([...r.tHits].map((h) => `${h} ${ENGINE.T_NAMES[h]}`)).join(" / "),
       위험점수: r.score, 등급: r.grade, "선별 사유": r.reason, 추가확인사항: r.checks.join("; "),
       검토결과: S.reviews[r.no]?.result || "", 검토의견: S.reviews[r.no]?.opinion || "",
