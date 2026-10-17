@@ -836,7 +836,7 @@
           <div class="mm-edit"><span>✎ 제목·본문을 눌러 바로 고칠 수 있습니다 (창을 닫기 전까지 사람별로 유지)</span><button class="btn" id="mmReset" type="button">처음 문구로 되돌리기</button></div>
           <div class="mm-paper" id="mmBody" contenteditable="true"></div>
         </div></div>
-      <div class="mm-f"><span class="hint">본문 복사 후 메일 프로그램에 붙여 넣으면 표 모양이 유지됩니다.</span><label><input type="checkbox" id="mmRecord" checked> <span id="mmRecordTxt"></span></label><button class="btn primary" id="mmCopy" type="button">본문 복사</button></div>
+      <div class="mm-f"><span class="hint"></span><label><input type="checkbox" id="mmRecord" checked> <span id="mmRecordTxt"></span></label><button class="btn primary" id="mmCopy" type="button">본문 복사</button></div>
     </div>`;
     $("#mailModal").hidden = false;
     renderMail();
