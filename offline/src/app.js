@@ -847,7 +847,7 @@
     const g = M.groups[M.sel], e = M.edits[g.key] || {};
     $("#mmSubj").value = e.subj ?? mailSubject(g);
     $("#mmBody").innerHTML = e.body ?? mailBody(g);
-    $("#mmRecordTxt").textContent = `복사하면 소명요청일·회신기한을 이 ${g.items.length}건에 기록`;
+    $("#mmRecordTxt").textContent = "본문 복사시 결과 엑셀에 소명요청일·회신기한 자동 입력";
   }
   const closeMail = () => { $("#mailModal").hidden = true; $("#mailModal").innerHTML = ""; $("#mailBtn").focus(); };
   async function copyRich(el) {
