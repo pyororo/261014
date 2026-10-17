@@ -375,9 +375,16 @@
   function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x))); const f = x / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
 
   function renderRecs() {
-    const base = R.recs.map((r) => `<div class="rec"><h3>${esc(r.title)}</h3><div class="basis">${esc(r.basis)}</div><div class="why">${esc(r.why)}</div><div class="how">규칙안: ${esc(r.rule)}</div></div>`).join("");
+    const base = R.recs.map((r, i) => `<div class="rec"><h3>${esc(r.title)}</h3><div class="basis">${esc(r.basis)}</div><div class="why">${esc(r.why)}</div><div class="how">규칙안: ${esc(r.rule)}</div><button class="btn rec-copy" type="button" data-rec="${i}" id="recCopy${i}">규칙 요청 문구 복사</button></div>`).join("");
     $("#recs").innerHTML = base;
   }
+  // 새 규칙을 요청할 때 붙여 넣을 문구: 근거(실제 이름·건수·금액·적요 예시)는 빼고 제목·이유·규칙안만 복사
+  $("#recs").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-rec]"); if (!b) return;
+    const r = R.recs[Number(b.dataset.rec)];
+    const text = `[추가 점검 규칙 요청]\n항목: ${r.title}\n이유: ${r.why}\n규칙안: ${r.rule}`;
+    try { await navigator.clipboard.writeText(text); flash("#" + b.id, "복사했습니다"); } catch { flash("#" + b.id, "복사할 수 없습니다"); }
+  });
 
   // ── 점검 규칙 수정 화면 ──
   // 고친 값은 [적용]을 눌러야 반영. 이 PC 브라우저에 기억하고, 기준표 엑셀('규칙설정' 시트)로 내보내 다른 PC에서도 씀

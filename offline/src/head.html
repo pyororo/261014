@@ -196,6 +196,7 @@ mark.ev .ng-txt { color: inherit; }
 .rec .basis { font-size: 13px; }
 .rec .why { font-size: 12.5px; color: var(--ink-2); }
 .rec .how { font-size: 12px; color: var(--ink-3); font-family: var(--f-mono); }
+.rec .rec-copy { justify-self: start; margin-top: 4px; font-size: 12px; padding: 5px 10px; }
 .rec.claude { border-style: dashed; border-color: var(--accent); }
 
 .settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 16px; }
@@ -508,7 +509,7 @@ button.tg { border: 0; padding: 0; cursor: pointer; flex: none; }
 
   <section class="needs-data" data-pane="recs" hidden>
     <div class="bar">
-      <div class="src">기존 규칙(R01~R17, T-R1~T-R4)에 없는 패턴을 최근 3개월 집계에서 찾아 제안합니다.</div>
+      <div class="src">기존 규칙(R01~R17, T-R1~T-R4)에 없는 패턴을 최근 3개월 집계에서 찾아 제안합니다. 규칙으로 넣고 싶으면 <b>규칙 요청 문구 복사</b>로 복사해 요청하세요. 근거(이름·건수·금액)는 복사되지 않습니다.</div>
     </div>
     <div class="recs" id="recs"></div>
   </section>
