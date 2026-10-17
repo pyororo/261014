@@ -392,6 +392,35 @@ button.tg { border: 0; padding: 0; cursor: pointer; flex: none; }
 .drawer .wgrp h3 span { font-weight: 700; }
 .drawer .wgrp .rr-top { grid-template-columns: 40px minmax(0, 1fr) 48px; }
 .drawer .wgrp .rr-top:has(.dots), .drawer .wgrp .rr-top:has(.rr-tag) { grid-template-columns: 40px minmax(0, 1fr) auto 48px; }
+/* 소명 요청 메일 */
+.btn.mail { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.mm-back { position: fixed; inset: 0; background: rgba(10,14,12,.45); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 28px 16px; overflow: auto; }
+.mm { background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 10px; width: min(1240px, 100%); box-shadow: 0 12px 40px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+.mm-h { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+.mm-h h2 { font-size: 16px; margin: 0; } .mm-h .sub { color: var(--ink-3); font-size: 12.5px; } .mm-h .sp { flex: 1; }
+.mm-opt { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 18px; background: var(--paper); border-bottom: 1px solid var(--rule); font-size: 13px; color: var(--ink-2); }
+.mm-opt input { font: inherit; border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; background: var(--sheet); color: var(--ink); }
+.mm-opt .muted { color: var(--ink-3); }
+.mm-b { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 520px; }
+.mm-l { border-right: 1px solid var(--rule); padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.mm-l .who { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; background: none; color: inherit; text-align: left; font: inherit; }
+.mm-l .who small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
+.mm-l .who .n { font-size: 12px; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.mm-l .who.on { background: var(--accent-soft); border-color: var(--accent); }
+.mm-l .who.done .nm::after { content: " ✓ 복사함"; color: var(--pass); font-size: 11px; font-weight: 600; }
+.mm-l .who.warn small { color: var(--mid); }
+.mm-r { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mm-row { display: flex; gap: 8px; align-items: center; }
+.mm-row label { font-size: 12px; color: var(--ink-3); width: 34px; flex: none; }
+.mm-subj { flex: 1; min-width: 0; border: 1px solid var(--rule); border-radius: 6px; padding: 7px 10px; font-size: 13.5px; background: var(--sheet); color: var(--ink); }
+.mm-edit { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); margin-bottom: -4px; } .mm-edit .btn { font-size: 12px; padding: 4px 10px; }
+/* 본문은 메일에 붙을 모습 그대로(흰 바탕) 보여 줌 */
+.mm-paper { border: 1px solid var(--rule); border-radius: 8px; padding: 18px 20px; background: #fff; color: #1c2320; overflow-x: auto; }
+.mm-paper:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mm-f { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--rule); }
+.mm-f .hint { color: var(--ink-3); font-size: 12px; flex: 1; min-width: 200px; }
+.mm-f label { font-size: 13px; color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
+@media (max-width: 760px) { .mm-b { grid-template-columns: minmax(0, 1fr); } .mm-l { border-right: 0; border-bottom: 1px solid var(--rule); } }
 </style>
 </head>
 <body class="is-empty">
@@ -420,7 +449,7 @@ button.tg { border: 0; padding: 0; cursor: pointer; flex: none; }
       <h2>사용 방법</h2>
       <p><b>1.</b> <b>기준표 엑셀</b>(계정코드·업종코드·공휴일·점검기준·직원마스터·휴가내역 시트)과 <b>SAP 추출 엑셀</b>을 함께 불러옵니다. 여러 파일을 한 번에 골라도 되고, 나눠서 불러오면 승인번호 기준으로 누적됩니다.</p>
       <p><b>2.</b> 기준표가 없으면 <b>기준표 양식 내려받기</b>로 받은 파일에 실제 사내 기준을 입력해 씁니다. 양식의 값은 교육용 가상값입니다.</p>
-      <p><b>3.</b> 점검 대상월을 고르고 목록에서 건을 눌러 검토결과·의견을 입력한 뒤 <b>결과 엑셀 저장</b>으로 보관합니다. 결과 엑셀 맨 앞 '요약' 시트에는 검토결과별·규칙별·부서별·소명 처리 현황 표가 수식으로 들어 있어 검토결과·소명결과를 고치면 바로 다시 계산되고, 점검대상목록에는 소명요청일·회신기한·회신일·소명결과·소명 요지·증빙번호 열이 빈칸으로 들어 있어 소명 관리대장으로 이어 쓸 수 있고(소명결과는 목록에서 선택), 저장한 결과 엑셀을 다시 불러오면 검토결과·의견과 소명 열 내용이 복원됩니다.</p>
+      <p><b>3.</b> 점검 대상월을 고르고 목록에서 건을 눌러 검토결과·의견을 입력한 뒤 <b>결과 엑셀 저장</b>으로 보관합니다. 결과 엑셀 맨 앞 '요약' 시트에는 검토결과별·규칙별·부서별·소명 처리 현황 표가 수식으로 들어 있어 검토결과·소명결과를 고치면 바로 다시 계산되고, 점검대상목록에는 소명요청일·회신기한·회신일·소명결과·소명 요지·증빙번호 열이 빈칸으로 들어 있어 소명 관리대장으로 이어 쓸 수 있고(소명결과는 목록에서 선택), 저장한 결과 엑셀을 다시 불러오면 검토결과·의견과 소명 열 내용이 복원됩니다. 검토결과를 '소명요청'으로 고른 건은 <b>✉ 소명 요청 메일 만들기</b>로 사람별 메일 제목·본문(표 포함)을 만들어 메일 프로그램에 붙여 넣을 수 있습니다.</p>
     </div>
     <div class="panel">
       <h2>처리 점검표 <small id="scoreNote"></small></h2>
@@ -446,6 +475,7 @@ button.tg { border: 0; padding: 0; cursor: pointer; flex: none; }
       </div>
       <div class="controls">
         <span class="src" id="reviewProgress"></span>
+        <button class="btn mail" id="mailBtn" type="button"></button>
         <button class="btn" id="copyBtn" type="button">표 복사(엑셀 붙여넣기용)</button>
         <button class="btn primary" id="xlsxBtn" type="button">결과 엑셀 저장</button>
       </div>
@@ -509,6 +539,8 @@ button.tg { border: 0; padding: 0; cursor: pointer; flex: none; }
     <div class="dh"><h2>점검 규칙표</h2><div class="acts"><button class="btn primary" id="ruleEdit" type="button">✎ 규칙 수정</button><button class="btn" id="ruleClose" type="button">닫기</button></div></div>
     <div id="ruleBody"></div>
   </aside>
+
+  <div class="mm-back" id="mailModal" hidden></div>
 
   <div class="ed-ov" id="ruleEditor" hidden>
     <div class="ed" role="dialog" aria-modal="true" aria-labelledby="edTitle">

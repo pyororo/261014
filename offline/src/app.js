@@ -253,6 +253,7 @@
     if (S.sel && !rows.some((r) => r.no === S.sel)) S.sel = null;
     const done = R.list.filter((r) => S.reviews[r.no]?.result).length;
     $("#reviewProgress").textContent = `검토 입력 ${fmt(done)}/${fmt(R.list.length)}건`;
+    renderMailBtn();
     // 상세 영역을 표 밖으로 되돌린 뒤 표를 다시 그리고, 선택한 행 바로 아래로 옮김
     const det = $("#detail"); if (det.closest("#listTbl")) $("#listTbl").closest(".tbl-wrap").after(det);
     $("#listTbl").innerHTML = `<thead><tr><th>등급</th><th>점수</th><th>걸린 규칙</th><th>승인일시</th><th>직원 · 부서</th><th>가맹점 · 적요</th><th style="text-align:right">금액</th><th>선별 사유</th><th>검토</th></tr></thead><tbody>` +
@@ -772,6 +773,116 @@
     const text = [Object.keys(exportRows()[0] || {}).join("\t"), ...tsv].join("\n");
     try { await navigator.clipboard.writeText(text); flash("#copyBtn", "복사했습니다"); } catch { flash("#copyBtn", "복사할 수 없습니다"); }
   });
+  // ── 소명 요청 메일: 검토결과 '소명요청' 건을 사람별로 묶어 메일 제목·본문을 만듦 ──
+  const WD = ["일", "월", "화", "수", "목", "금", "토"];
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const localYmd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const withWd = (s) => { const [y, m, d] = s.split("-").map(Number); return s ? `${s}(${WD[new Date(y, m - 1, d).getDay()]})` : ""; };
+  // 다음 영업일: 주말과 기준표 공휴일 시트의 날을 건너뜀
+  function nextBizDay(from) {
+    const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6 || R.ref.holidays.has(localYmd(d)));
+    return localYmd(d);
+  }
+  function mailGroups() {
+    const map = new Map();
+    for (const r of R.list) {
+      if (S.reviews[r.no]?.result !== "소명요청") continue;
+      // 사용자 미기재(공용카드)는 부서별로 따로 묶어 카드 관리자에게 보냄
+      const key = r.emp ? `e:${r.emp}` : `d:${r.dept}`;
+      if (!map.has(key)) map.set(key, { key, emp: r.emp || "", dept: r.dept, items: [] });
+      map.get(key).items.push(r);
+    }
+    return [...map.values()].sort((a, b) => (!a.emp - !b.emp) || a.emp.localeCompare(b.emp, "ko") || a.dept.localeCompare(b.dept, "ko"));
+  }
+  const M = { groups: [], sel: 0, edits: {}, done: new Set(), due: "", today: "" };
+  const monthKo = () => `${S.month.slice(0, 4)}년 ${Number(S.month.slice(5))}월`;
+  const mailName = (g) => (g.emp ? g.emp : "사용자 미기재 (공용카드)");
+  const mailSubject = (g) => `[감사] ${monthKo()} 법인카드 사용내역 소명 요청 (${mailName(g)}, ${g.items.length}건)`;
+  // 메일 프로그램에 붙여도 모양이 유지되도록 서식은 모두 인라인으로 넣음
+  function mailBody(g) {
+    const sender = esc(store.get("cc_sender", "") || "○○○");
+    const F = "font-family:'맑은 고딕','Malgun Gothic',sans-serif;font-size:10pt;color:#1c2320;";
+    const th = `style="${F}background:#e2edf0;color:#1d5a6e;font-weight:bold;text-align:left;padding:6px 8px;border:1px solid #b9c4c0;white-space:nowrap"`;
+    const td = (x = "") => `style="${F}padding:6px 8px;border:1px solid #b9c4c0;vertical-align:top;${x}"`;
+    const p = `style="${F}margin:0 0 12px;line-height:1.6"`;
+    const rows = g.items.map((r, i) => `<tr><td ${td("text-align:center")}>${i + 1}</td><td ${td("white-space:nowrap")}>${r.dkey} ${r.time.slice(0, 5)}</td><td ${td("white-space:nowrap")}>${esc(r.merchant)}</td><td ${td("text-align:right;white-space:nowrap")}>${fmt(r.amount)}</td><td ${td("white-space:nowrap")}>${esc(r.glName)}</td><td ${td()}>${r.memo ? esc(r.memo) : "(공란)"}</td><td ${td()}>${esc(ENGINE.reasonShort(r))}</td><td ${td()}>${r.checks.map(esc).join("<br>")}</td><td ${td("min-width:90px")}></td></tr>`).join("");
+    return `<p ${p}>안녕하세요,<br>감사부 ${sender}입니다.</p>`
+      + `<p ${p}>${monthKo()} 법인카드 사용 적정성 점검 결과, 아래 ${g.items.length}건의 사용 내역에 대해 확인이 필요하여 소명을 요청드립니다.${g.emp ? "" : " 공용카드 사용 건으로 실제 사용자가 전표에 기재되지 않았습니다."}</p>`
+      + `<table style="border-collapse:collapse;margin:4px 0 14px" cellpadding="0" cellspacing="0"><tr>${["No", "승인일시", "가맹점", "금액(원)", "계정명", "전표 품목 텍스트", "선별 사유", "확인 요청 사항", "비고"].map((h) => `<th ${th}>${h}</th>`).join("")}</tr>${rows}</table>`
+      + `<p ${p}>• <b>회신 기한</b>: ${withWd(M.due)}<br>• <b>회신 방법</b>: 건별 확인 요청 사항에 대한 답변 및 증빙(영수증, 품의서 등)을 첨부하여 메일 회신 요청드립니다.</p>`
+      + `<p ${p}>감사합니다.<br>${sender} 드림</p>`;
+  }
+  function renderMailBtn() {
+    const g = mailGroups(), n = g.reduce((a, x) => a + x.items.length, 0);
+    const b = $("#mailBtn");
+    b.textContent = `✉ 소명 요청 메일 만들기 (${g.length}명 · ${n}건)`;
+    b.disabled = !n;
+    b.title = n ? "검토결과 '소명요청' 건을 사람별로 묶어 메일 제목·본문을 만듭니다" : "검토결과를 '소명요청'으로 고른 건이 없습니다";
+  }
+  function openMail() {
+    M.groups = mailGroups(); if (!M.groups.length) return;
+    const now = new Date();
+    M.sel = 0; M.edits = {}; M.done = new Set(); M.today = localYmd(now); M.due = nextBizDay(now);
+    const n = M.groups.reduce((a, x) => a + x.items.length, 0);
+    $("#mailModal").innerHTML = `<div class="mm" role="dialog" aria-modal="true" aria-labelledby="mmTitle">
+      <div class="mm-h"><h2 id="mmTitle">소명 요청 메일 만들기</h2><span class="sub">${esc(S.month)} 점검 · 검토결과 '소명요청' ${n}건을 사용자별로 묶었습니다</span><span class="sp"></span><button class="btn" id="mmClose" type="button">닫기</button></div>
+      <div class="mm-opt"><span>회신 기한 <input type="date" id="mmDue" value="${M.due}"> <span class="muted">(요청일 ${M.today} + 1영업일, 주말·공휴일 제외)</span></span><span>보내는 사람 <input id="mmSender" value="${esc(store.get("cc_sender", ""))}" placeholder="이름" style="width:110px"> <span class="muted">(인사말·서명에 들어감, 이 PC에 기억)</span></span></div>
+      <div class="mm-b"><div class="mm-l" id="mmList"></div>
+        <div class="mm-r">
+          <div class="mm-row"><label for="mmSubj">제목</label><input class="mm-subj" id="mmSubj"><button class="btn" id="mmSubjCopy" type="button">제목 복사</button></div>
+          <div class="mm-edit"><span>✎ 제목·본문을 눌러 바로 고칠 수 있습니다 (창을 닫기 전까지 사람별로 유지)</span><button class="btn" id="mmReset" type="button">처음 문구로 되돌리기</button></div>
+          <div class="mm-paper" id="mmBody" contenteditable="true"></div>
+        </div></div>
+      <div class="mm-f"><span class="hint">본문 복사 후 메일 프로그램에 붙여 넣으면 표 모양이 유지됩니다.</span><label><input type="checkbox" id="mmRecord" checked> <span id="mmRecordTxt"></span></label><button class="btn primary" id="mmCopy" type="button">본문 복사</button></div>
+    </div>`;
+    $("#mailModal").hidden = false;
+    renderMail();
+    $("#mmClose").focus();
+  }
+  function renderMail() {
+    $("#mmList").innerHTML = M.groups.map((g, i) => `<button type="button" class="who ${i === M.sel ? "on" : ""} ${M.done.has(g.key) ? "done" : ""} ${g.emp ? "" : "warn"}" data-i="${i}"><span><span class="nm">${esc(g.emp || "사용자 미기재")}</span><small>${esc(g.dept)}${g.emp ? "" : " · 카드 관리자에게"}</small></span><span class="n">${g.items.length}건</span></button>`).join("");
+    const g = M.groups[M.sel], e = M.edits[g.key] || {};
+    $("#mmSubj").value = e.subj ?? mailSubject(g);
+    $("#mmBody").innerHTML = e.body ?? mailBody(g);
+    $("#mmRecordTxt").textContent = `복사하면 소명요청일·회신기한을 이 ${g.items.length}건에 기록`;
+  }
+  const closeMail = () => { $("#mailModal").hidden = true; $("#mailModal").innerHTML = ""; $("#mailBtn").focus(); };
+  async function copyRich(el) {
+    const html = `<div style="font-family:'맑은 고딕','Malgun Gothic',sans-serif;font-size:10pt">${el.innerHTML}</div>`;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([el.innerText], { type: "text/plain" }) })]);
+      return true;
+    } catch {
+      // ClipboardItem을 못 쓰는 브라우저: 본문을 선택해 복사
+      try { const sel = getSelection(), rg = document.createRange(); rg.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(rg); const ok = document.execCommand("copy"); sel.removeAllRanges(); return ok; } catch { return false; }
+    }
+  }
+  $("#mailBtn").addEventListener("click", openMail);
+  $("#mailModal").addEventListener("click", async (e) => {
+    const t = e.target;
+    const who = t.closest(".who"); if (who) { M.sel = Number(who.dataset.i); renderMail(); return; }
+    if (t.id === "mmClose") { closeMail(); return; }
+    const g = M.groups[M.sel];
+    if (t.id === "mmReset") { delete M.edits[g.key]; renderMail(); return; }
+    if (t.id === "mmSubjCopy") { try { await navigator.clipboard.writeText($("#mmSubj").value); flash("#mmSubjCopy", "복사했습니다"); } catch { flash("#mmSubjCopy", "복사할 수 없습니다"); } return; }
+    if (t.id === "mmCopy") {
+      if (!(await copyRich($("#mmBody")))) { flash("#mmCopy", "복사할 수 없습니다"); return; }
+      if ($("#mmRecord").checked) {
+        for (const r of g.items) { const rv = (S.reviews[r.no] ||= {}); rv.sm = { ...(rv.sm || {}), 소명요청일: M.today, 회신기한: M.due }; }
+        store.set("cc_reviews", S.reviews);
+      }
+      M.done.add(g.key); renderMail(); flash("#mmCopy", "복사했습니다");
+    }
+  });
+  $("#mailModal").addEventListener("input", (e) => {
+    const t = e.target, g = M.groups[M.sel];
+    if (t.id === "mmSubj") (M.edits[g.key] ||= {}).subj = t.value;
+    else if (t.id === "mmBody") (M.edits[g.key] ||= {}).body = t.innerHTML;
+    else if (t.id === "mmSender") { store.set("cc_sender", t.value.trim()); if (!M.edits[g.key]?.body) $("#mmBody").innerHTML = mailBody(g); }
+    else if (t.id === "mmDue" && t.value) { M.due = t.value; if (!M.edits[g.key]?.body) $("#mmBody").innerHTML = mailBody(g); }
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#mailModal").hidden) closeMail(); });
   $("#xlsxBtn").addEventListener("click", () => {
     const wb = XLSX.utils.book_new();
     const rows = exportRows();
